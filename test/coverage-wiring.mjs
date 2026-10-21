@@ -529,6 +529,39 @@ await c.check('仓库卡片点击可复制名称', async () => {
   if (!doc.querySelector('.mini-toast.show')) throw new Error('复制后没有轻提示');
 });
 
+await c.check('会话隔离：一个会话启用插件，另一个会话仍关闭（前端）', async () => {
+  const doc = window.document;
+  await window.api('/api/chat-profiles', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'group', id: '990002', alias: '隔离测试群B' })
+  });
+  try {
+    await window.api('/api/skills/sticker-memory', {
+      method: 'POST',
+      body: JSON.stringify({ enabled: true, chat: 'group:990001' })
+    });
+    const openTools = async (key) => {
+      window.switchTab('chatmanage');
+      await sleep(400);
+      window.selectCmScope(key);
+      await sleep(800);
+      window.switchCmSub('settings');
+      await sleep(1000);
+      doc.querySelector('[data-session-section="tools"]')?.click();
+      await sleep(600);
+      const row = [...doc.querySelectorAll('.skill-scope-row')]
+        .find((el) => String(el.dataset.search || '').includes('sticker-memory'));
+      return row?.querySelector('input.skill-scope-toggle')?.checked;
+    };
+    const a = await openTools('group:990001');
+    const b = await openTools('group:990002');
+    if (a !== true) throw new Error('990001 应显示已启用');
+    if (b !== false) throw new Error('990002 不应被 990001 的开关影响');
+  } finally {
+    await window.api('/api/chat-profiles/group:990002', { method: 'DELETE' });
+  }
+});
+
 await c.check('人设：机器人名字修改后能自动保存（回归）', async () => {
   const doc = window.document;
   window.switchTab('chatmanage');

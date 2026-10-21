@@ -250,6 +250,24 @@ c.section('2.6 llm-messages.js 思考消息序列');
   });
 }
 
+// ── 2.7 skills/config.js：新装默认关闭的内存兜底 ───────────────────────
+c.section('2.7 新装默认关闭内存兜底');
+{
+  const { DEFAULT_CONFIG, setRuntimeConfig } = await import('../src/config.js');
+  const { markSkillDefaultOff, clearSkillDefaultOff, isSkillEnabledInConfig } = await import('../src/skills/config.js');
+
+  await c.check('标记后即使配置残留 enabled:true，也按关闭处理；清除后恢复', () => {
+    const cfg = structuredClone(DEFAULT_CONFIG);
+    cfg.skills = { 'forced-test': { enabled: true } };
+    setRuntimeConfig(cfg);
+    assert.equal(isSkillEnabledInConfig('forced-test'), true, '未标记时应读配置');
+    markSkillDefaultOff('forced-test');
+    assert.equal(isSkillEnabledInConfig('forced-test'), false, '标记后必须强制关闭（配置写盘失败兜底）');
+    clearSkillDefaultOff('forced-test');
+    assert.equal(isSkillEnabledInConfig('forced-test'), true, '用户显式打开/清除标记后应恢复');
+  });
+}
+
 // ── 3. md-to-plain.js ────────────────────────────────────────────────────
 c.section('3. md-to-plain.js Markdown 清洗与切分');
 {

@@ -36,7 +36,7 @@ import { builtinVisionResults } from './model-vision-docs.js';
 import { todayKey } from './util.js';
 import { logger } from './logger.js';
 import { skillManager } from './skills/manager.js';
-import { getSkillConfig, setSkillConfig, setSkillEnabled, listConfiguredSkillIds } from './skills/config.js';
+import { getSkillConfig, setSkillConfig, setSkillEnabled, clearSkillDefaultOff, listConfiguredSkillIds } from './skills/config.js';
 import { availabilityOf, listTools, CATEGORY_META } from './tool-registry.js';
 import { safeFetchBinary, browseLockState } from './safe-fetch.js';
 import { getGlobalBlocklist, updateGlobalBlocklist, FIXED_PRICE_FEED_URL } from './community.js';
@@ -1138,6 +1138,8 @@ export function createRoutes(deps) {
         // 1) 开关（先写配置，再同步生命周期；顺序不能反 ——
         //    activate 里读配置必须已经生效，否则 Skill 会以为自己是关闭的）
         if (body.enabled !== undefined) {
+          // 用户显式打开（无论全局还是会话）都解除“新装默认关闭”内存标记。
+          if (body.enabled) clearSkillDefaultOff(id);
           if (chatKey) {
             const prev = getProfile(chatKey)?.overrides?.skills?.[id];
             const mergedSettings = { ...(prev && typeof prev === 'object' ? prev : {}), enabled: !!body.enabled };
@@ -1147,6 +1149,10 @@ export function createRoutes(deps) {
           }
           if (isSkillWantedAnywhere(id, dflt)) skillManager.activate(id, context);
           else skillManager.deactivate(id, context);
+          // 运行时启用/停用后必须重建工具快照：orchestrator.toolDefs 是构造时的
+          // 一次性快照，不刷新的话模型根本看不到刚启用技能的工具（表现为“功能用不了”，
+          // 但 /api/tools/availability 显示可用）。
+          try { orchestrator.refreshToolDefs(); } catch { /* 刷新失败不影响开关结果 */ }
         }
 
         // 2) 设置（只允许改 manifest 声明过的键，防止前端塞垃圾字段进配置）。
