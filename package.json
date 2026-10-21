@@ -79,9 +79,12 @@
     "test:wakesem": "node test/wake-semantics-test.mjs"
   },
   "dependencies": {
+    "docx": "^9.13.0",
     "js-yaml": "^5.4.1",
+    "pptxgenjs": "^4.0.1",
     "undici": "^6.28.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "electron": "^33.2.0",
