@@ -1,8 +1,3 @@
-// zip 解压安装：把市场下载的安装包安全地落到 skills/ 或 plugins/ 目录。
-//
-// 独立成模块的原因：这段是"往磁盘写可执行 JS"的入口，安全边界必须集中、可单测。
-// 与 server/community_app.py 的 validate_zip 规则对齐（那里上传时校验一次，
-// 这里安装前再校验一次 —— 不信任任何传输环节）。
 import fs from 'node:fs';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
@@ -10,6 +5,7 @@ import { inflateRawSync } from 'node:zlib';
 const BANNED_EXT = /\.(exe|dll|bat|cmd|ps1|vbs|sh)$/i;
 const MAX_FILES = 100;
 const MAX_TOTAL = 32 * 1024 * 1024;
+const MANIFEST_RE = /(^|\/)(skill|plugin)\.json$/i;
 
 /**
  * 结构校验（抛错 = 拒绝安装）：
@@ -26,14 +22,64 @@ export function validateZipStructure(buffer) {
   return entries;
 }
 
+/** 清单文件所在目录（'' = zip 根目录）。 */
+function dirOf(name) {
+  const i = name.lastIndexOf('/');
+  return i < 0 ? '' : name.slice(0, i);
+}
+
+function readManifestJSON(entry) {
+  try { return JSON.parse(entry.data.toString('utf8').replace(/^\uFEFF/, '')); } catch { return null; }
+}
+
+/**
+ * 找真正的模块根目录。
+ *
+ * 市场包/手工包的结构不统一，实测出现过：
+ *   <id>/skill.json                     （标准：清单在 zip 根下的一层）
+ *   skill.json                          （清单直接在 zip 根）
+ *   wrapper/<id>/skill.json             （多套了一层外壳目录 ← 本次修复的目标）
+ *   a/b/<id>/plugin.json                （手工打包多套了两层）
+ * 这里以“清单文件所在目录”为准：取层级最浅、且同目录有入口文件（index.js 或清单 entry）的那个。
+ */
+function pickModuleRoot(entries) {
+  const manifests = entries.filter((e) => MANIFEST_RE.test(e.name));
+  if (!manifests.length) return null;
+  const fileSet = new Set(entries.map((e) => e.name));
+  const scored = manifests.map((e) => {
+    const dir = dirOf(e.name);
+    const depth = dir ? dir.split('/').length : 0;
+    const raw = readManifestJSON(e);
+    let hasEntry = false;
+    if (!dir) {
+      // 清单在根：同层的 index.js 或任意文件都算结构正常
+      hasEntry = fileSet.has('index.js') || entries.some((x) => x.name !== e.name);
+    } else {
+      hasEntry = fileSet.has(`${dir}/index.js`);
+      const entryRel = String(raw?.entry || '').replace(/\\/g, '/').replace(/^\.\//, '');
+      if (!hasEntry && entryRel) hasEntry = fileSet.has(`${dir}/${entryRel}`);
+    }
+    return { dir, depth, hasEntry, isSkill: /(^|\/)skill\.json$/i.test(e.name) ? 1 : 0 };
+  });
+  scored.sort((a, b) => a.depth - b.depth || Number(b.hasEntry) - Number(a.hasEntry) || b.isSkill - a.isSkill);
+  return scored[0].dir;
+}
+
+/** 目录名合法性（与既有的目录名规则保持一致）。 */
+function validDirName(name) {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(String(name || ''));
+}
+
 /**
  * 解压安装到 <root>/skills/ 或 <root>/plugins/ 下的一个目录。
  *
  * 目录名规则：
- *   · zip 里通常有一层与包同名的根目录（服务端打包格式 `<id>/...`），剥掉它
- *   · 没有统一根目录时用 preferId（服务器告知的 id）
- *   · 与本地已有目录冲突 → 自动 _1/_2（重装场景：同 id 覆盖会丢用户改动，
- *     而且插件热重载正在 watch 旧目录，覆盖写一半会加载出半截代码）
+ *   · 优先用模块根目录名（剥掉所有外层包装）
+ *   · 其次 preferId（服务器告知的 id）/ 清单里的 id
+ *   · 与本地已有目录冲突 → 自动 _1/_2（重装场景不覆盖用户改动）
+ *
+ * 兼容“多套一层文件夹”：zip 里 <外壳>/<id>/skill.json、甚至 a/b/<id>/plugin.json
+ * 都会自动定位到 <id> 那一层。找不到清单的包会写完后校验失败并**回滚目录**。
  *
  * @returns {Promise<string>} 实际落地的目录名
  */
@@ -42,36 +88,64 @@ export async function unzipToModuleDir(buffer, { root, type, preferId = '' }) {
   if (!entries.length) throw new Error('安装包是空的');
   const baseDir = path.join(root, type === 'plugin' ? 'plugins' : 'skills');
 
-  // 剥统一根目录：所有条目都共享同一个第一段时去掉它
-  let names = entries.map((e) => e.name);
-  let strip = 0;
-  const firstSeg = names[0].split('/')[0];
-  if (firstSeg && names.every((n) => n.startsWith(firstSeg + '/'))) strip = firstSeg.length + 1;
-  const relNames = names.map((n) => n.slice(strip));
-  if (relNames.some((n) => !n)) throw new Error('安装包结构异常（剥掉根目录后有条目为空）');
+  // 1) 归一化路径（parseZip 已做过一次，这里再兜一层）
+  for (const e of entries) e.name = e.name.replace(/\\/g, '/');
 
-  // 落地目录名：优先 zip 根目录名，其次 preferId
-  let dirName = strip ? firstSeg : (preferId || 'module');
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(dirName)) dirName = preferId || 'module';
-  // 冲突递增
+  // 2) 找模块根
+  const moduleRoot = pickModuleRoot(entries);   // null / '' / 'wrapper' / 'a/b/<id>'
+  let relEntries;
+  if (moduleRoot !== null) {
+    const prefix = moduleRoot ? `${moduleRoot}/` : '';
+    relEntries = entries
+      .filter((e) => (prefix ? e.name.startsWith(prefix) : true))
+      .map((e) => ({ ...e, rel: prefix ? e.name.slice(prefix.length) : e.name }))
+      .filter((e) => e.rel && !e.rel.endsWith('/'));
+  } else {
+    // 没有清单：退回“剥一层公共根目录”的旧逻辑，写完后再校验清单是否存在
+    const names = entries.map((e) => e.name);
+    const firstSeg = names[0].split('/')[0];
+    const strip = firstSeg && names.every((n) => n.startsWith(`${firstSeg}/`)) ? firstSeg.length + 1 : 0;
+    relEntries = entries.map((e, i) => ({ ...e, rel: names[i].slice(strip) }));
+    if (relEntries.some((e) => !e.rel)) throw new Error('安装包结构异常（剥掉根目录后有条目为空）');
+  }
+  if (!relEntries.length) throw new Error('安装包结构异常：模块目录为空');
+
+  // 3) 目录名：preferId → 清单 id → 模块根末级名 → module
+  const manifest = entries.find((e) => MANIFEST_RE.test(e.name)
+    && dirOf(e.name) === (moduleRoot || ''));
+  const manifestId = String(readManifestJSON(manifest || { data: Buffer.from('') })?.id || '');
+  const rootBase = moduleRoot ? moduleRoot.split('/').pop() : '';
+  const dirName = [preferId, manifestId, rootBase, 'module'].find(validDirName) || 'module';
+
+  // 4) 冲突递增
   let finalName = dirName;
   for (let n = 1; n <= 100; n++) {
     if (!fs.existsSync(path.join(baseDir, finalName))) break;
     finalName = `${dirName}_${n}`;
   }
   const target = path.join(baseDir, finalName);
-  fs.mkdirSync(target, { recursive: true });
 
-  for (let i = 0; i < entries.length; i++) {
-    const rel = relNames[i];
-    // 二次防线：拼接结果必须仍在 target 内（解析后 path.relative 检查）
-    const dest = path.join(target, ...rel.split('/'));
-    const relCheck = path.relative(target, dest);
-    if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
-      throw new Error(`安装包包含非法路径：${entries[i].name}`);
+  // 5) 落盘（失败必须回滚，不能留半装目录）
+  try {
+    fs.mkdirSync(target, { recursive: true });
+    for (const e of relEntries) {
+      const dest = path.join(target, ...e.rel.split('/'));
+      const relCheck = path.relative(target, dest);
+      if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
+        throw new Error(`安装包包含非法路径：${e.name}`);
+      }
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, e.data);
     }
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, entries[i].data);
+    // 6) 兼容性校验：模块根必须真的落在目标目录根部
+    const hasManifest = fs.existsSync(path.join(target, 'skill.json'))
+      || fs.existsSync(path.join(target, 'plugin.json'));
+    if (!hasManifest) {
+      throw new Error('安装包结构异常：未找到 skill.json / plugin.json（可能多套了一层文件夹）');
+    }
+  } catch (error) {
+    try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* 清理失败不掩盖原因 */ }
+    throw error;
   }
   return finalName;
 }

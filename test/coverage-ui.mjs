@@ -308,6 +308,21 @@ await c.check('所有「×」图标按钮都有 aria-label', () => {
   assert.equal(missing.length, 0, `缺少 aria-label 的关闭按钮：\n  ${missing.join('\n  ')}`);
 });
 
+// ── 6. 渲染容器与作用域回归（2026-10-21）────────────────────────────────
+c.section('6. 会话设置渲染回归');
+
+await c.check('UI 不再引用后端函数 getProfile（否则开关插件时报 ReferenceError）', () => {
+  const hits = [...appJs.matchAll(/\bgetProfile\s*\(/g)].length;
+  assert.equal(hits, 0, `ui/app 里仍有 ${hits} 处 getProfile( 调用；应改用 loadScopeConfig()`);
+});
+
+await c.check('会话设置滚动容器有合成层隔离（防"下半屏变空"）', () => {
+  const m = /\.settings-pane-inner\s*\{[\s\S]*?\}/.exec(css);
+  assert.ok(m, '找不到 .settings-pane-inner 样式');
+  assert.ok(/transform\s*:\s*translateZ\(0\)/.test(m[0]), '缺少 transform: translateZ(0)');
+  assert.ok(/overflow-anchor\s*:\s*none/.test(m[0]), '缺少 overflow-anchor: none');
+});
+
 await c.check('index.html 里的纯图标按钮都有 aria-label 或可见文字', () => {
   for (const m of html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)) {
     const attrs = m[1];

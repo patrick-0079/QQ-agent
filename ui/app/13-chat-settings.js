@@ -157,8 +157,8 @@ function renderSettingsSidebar() {
         <span class="chat-row-main">
           <span class="chat-row-icon">${x.kind === 'group' ? '👥' : '👤'}</span>
           <span class="chat-row-text">
-            <span class="chat-row-name">${esc(x.name)}${denied ? '<span class="chat-deny-tag">🚫</span>' : ''}${!x.hasProfile && state.acceptAllSessions && !denied ? '<span class="chat-def-tag">默认</span>' : ''}</span>
-            <span class="chat-row-sub">${sub}</span>
+            <span class="chat-row-name"><span class="chat-row-title">${esc(x.name)}</span>${denied ? '<span class="chat-deny-tag">🚫</span>' : ''}${!x.hasProfile && state.acceptAllSessions && !denied ? '<span class="chat-def-tag">默认</span>' : ''}</span>
+            <span class="chat-row-sub">${x.kind === 'group' ? '群号' : 'QQ'} ${esc(String(x.id))} · ${sub}</span>
           </span>
         </span>
         <span class="chat-row-ops">
@@ -188,19 +188,23 @@ function renderSettingsSidebar() {
     </div>`;
 
   sidebar.innerHTML = isCm
-    ? `${runState}
-      <input type="search" id="chat-session-search" class="session-search" placeholder="搜索会话（名字/号码）…"
-             value="${esc(state.sessionSearch || '')}" autocomplete="off" />
+    ? `<div class="cm-rail-head">${runState}
+      <div class="cm-rail-actions">
+        <button class="btn btn-small" id="chat-session-add-btn" title="添加要单独配置/准入的会话">＋ 添加会话</button>
+        <button class="btn btn-small" id="session-broadcast-btn" title="给选中的群/私聊批量发送一条消息">群发</button>
+      </div>
+      <input type="search" id="chat-session-search" class="session-search" placeholder="搜索会话（名字/群号）…"
+             value="${esc(state.sessionSearch || '')}" autocomplete="off" /></div>
       <div class="settings-menu session-menu">
         <button class="settings-menu-item session-item ${activeScope === 'default' ? 'active' : ''}"
                 id="chat-default-item" title="没有单独添加的会话都归到默认会话">
           <span class="chat-row-main"><span class="chat-row-icon">★</span>
-            <span class="chat-row-text"><span class="chat-row-name">默认会话</span>
+            <span class="chat-row-text"><span class="chat-row-name"><span class="chat-row-title">默认会话</span></span>
               <span class="chat-row-sub">其余所有会话的合计</span></span></span>
         </button>
         ${shown.map(sessionRow).join('') || '<div class="hint session-empty">还没有单独添加的会话。点「＋ 添加会话」，其余会话都归「默认会话」。</div>'}
-        <button class="settings-menu-item session-add" id="chat-session-add-btn">＋ 添加会话</button>
-      </div>`
+      </div>
+      <div class="cm-rail-resizer" id="cm-rail-resizer" title="拖动调整左侧宽度（双击恢复默认）"></div>`
     : `${runState}${globalMenu}`;
   bindSettingsSidebarEvents(sidebar);
 }
@@ -266,6 +270,12 @@ function bindSettingsSidebarEvents(sidebar) {
 
   // 添加会话（曾被我误删绑定 → 点击无反应）
   sidebar.querySelector('#chat-session-add-btn')?.addEventListener('click', () => openAddSessionModal());
+  // 群发：入口已从运行记录列表头移到这里（逻辑在 10-feedback.js）
+  sidebar.querySelector('#session-broadcast-btn')?.addEventListener('click', () => {
+    if (typeof openBroadcastModal === 'function') openBroadcastModal();
+  });
+  // 左栏宽度拖拽（仅会话管理）
+  if (sidebar.id === 'cm-rail' && typeof initCmRailResizer === 'function') initCmRailResizer();
 
 
   sidebar.querySelectorAll('[data-gsec]').forEach((el) => {

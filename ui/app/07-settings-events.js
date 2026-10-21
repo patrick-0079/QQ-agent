@@ -184,11 +184,12 @@ function bindSettingsEvents(c) {
         if (idx >= 0 && r.skill) state.skills[idx] = r.skill;
         if (r.config) state.config = r.config;
         if (isSessionScope()) {
-          state.scopeOverrides = getProfile(state.settingsScope)?.overrides || state.scopeOverrides;
+          // 重新拉该会话的生效配置与覆盖（原 getProfile 是后端函数，UI 里从未定义）
+          await loadScopeConfig({ force: true });
           await loadChatProfiles({ quiet: true });
           mountSessionRestoreButton();
         }
-        await loadSkillsStatus();
+        await loadSkillsStatus(isSessionScope() ? { chat: state.settingsScope } : {});
         renderSettings();
       } catch (err) {
         cb.checked = !cb.checked;   // 失败回滚勾选状态
@@ -216,11 +217,12 @@ function bindSettingsEvents(c) {
         if (idx >= 0 && r.skill) state.skills[idx] = r.skill;
         if (r.config) state.config = r.config;
         if (isSessionScope()) {
-          state.scopeOverrides = getProfile(state.settingsScope)?.overrides || state.scopeOverrides;
+          // 重新拉该会话的生效配置与覆盖（原 getProfile 是后端函数，UI 里从未定义）
+          await loadScopeConfig({ force: true });
           await loadChatProfiles({ quiet: true });
           mountSessionRestoreButton();
         }
-        await loadSkillsStatus();
+        await loadSkillsStatus(isSessionScope() ? { chat: state.settingsScope } : {});
         renderSettings();
       } catch (err) {
         cb.checked = !cb.checked;
@@ -1006,4 +1008,3 @@ function bindSettingsEvents(c) {
     resetDataBtn.disabled = false;
   });
 }
-

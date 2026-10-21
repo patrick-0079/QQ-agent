@@ -809,6 +809,12 @@ function switchTab(name) {
     if (c) c.innerHTML = '';
   }
   state.tab = name;
+  // 会话级设置的“视图作用域”只在会话管理里有意义：离开时重置，
+  // 否则仓库/用量等页面会误把 isSessionScope() 当成 true（历史上导致仓库卡片变绿）。
+  if (name !== 'chatmanage') {
+    state.settingsView = 'global';
+    state.settingsScope = 'default';
+  }
   if (state.quoteMode && !(name === 'chatmanage' && state.cmSub === 'chats')) exitQuoteMode();
   if (name === 'chatmanage') enterChatManage();
   // 群名补底：设置页（人设分群按钮/活跃设置分群下拉）用 chatNameOf 取名字，

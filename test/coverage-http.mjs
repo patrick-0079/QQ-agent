@@ -1241,12 +1241,68 @@ c.section('13.6 黑名单优先级 / 默认会话口径');
   });
 }
 
-// ── 13.7 仓库只读化：重扫 / 新装默认关闭 / 删除级联 ──────────────────
+// ── 13.7 会话级技能开关隔离 ───────────────────────────────────────────
+// 背景（2026-10-21 bug）：仓库页误用会话作用域，某个会话启用后卡片变绿，
+// 看起来像“所有会话都启用了”。这里锁住后端口径：
+//   带 chat 的开关只写该会话 profile；全局 /api/skills 与其他会话保持关闭。
+c.section('13.7 会话级技能开关隔离');
+{
+  await c.check('GET /api/skills：每条带 needsConfig 布尔（仓库“需配置”提示依赖）', async () => {
+    const r = await hit('GET', '/api/skills');
+    assert.equal(r.status, 200);
+    for (const s of r.data.skills || []) {
+      assert.equal(typeof s.needsConfig, 'boolean', `技能 ${s.id} 缺少 needsConfig 布尔`);
+      assert.equal(typeof s.missingDeps, 'boolean', `技能 ${s.id} 缺少 missingDeps 布尔`);
+    }
+  });
+
+  await c.check('带 chat 的开关只影响该会话；全局与其他会话不变', async () => {
+    const A = 'group:999003';
+    const B = 'group:999004';
+    await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '999003' } });
+    await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '999004' } });
+    try {
+      const beforeGlobal = await hit('GET', '/api/config');
+      const base = beforeGlobal.data.skills?.['sticker-memory']?.enabled;
+      const on = await hit('POST', '/api/skills/sticker-memory', { body: { enabled: true, chat: A } });
+      assert.equal(on.status, 200, `会话开关应 200，实际 ${on.status} ${on.text}`);
+
+      const globalCfg = await hit('GET', '/api/config');
+      assert.equal(globalCfg.data.skills?.['sticker-memory']?.enabled ?? false, base ?? false,
+        '全局默认配置被会话开关污染');
+
+      const listGlobal = await hit('GET', '/api/skills');
+      const gRow = (listGlobal.data.skills || []).find((s) => s.id === 'sticker-memory');
+      assert.equal(gRow?.enabled, base ?? false, '全局技能列表不应显示会话级启用');
+
+      const profA = await hit('GET', '/api/chat-profiles/group:999003');
+      assert.equal(profA.data.overrides?.skills?.['sticker-memory']?.enabled, true, '会话覆盖没写进 profile');
+
+      const listB = await hit('GET', '/api/skills?chat=group%3A999004');
+      const bRow = (listB.data.skills || []).find((s) => s.id === 'sticker-memory');
+      assert.equal(bRow?.enabled, false, '其他会话不应被启用');
+
+      // 工具可用性也必须按会话隔离
+      const availA = await hit('GET', '/api/tools/availability?chat=group%3A999003');
+      const availB = await hit('GET', '/api/tools/availability?chat=group%3A999004');
+      const toolsA = (availA.data.tools || []).filter((t) => t.skillId === 'sticker-memory');
+      const toolsB = (availB.data.tools || []).filter((t) => t.skillId === 'sticker-memory');
+      assert.ok(toolsA.length > 0, '该技能应有工具');
+      assert.ok(toolsA.some((t) => t.enabled), '启用会话里该技能的工具应可用');
+      assert.ok(toolsB.every((t) => !t.enabled), '其他会话里该技能的工具必须不可用');
+    } finally {
+      await hit('DELETE', '/api/chat-profiles/group:999003');
+      await hit('DELETE', '/api/chat-profiles/group:999004');
+    }
+  });
+}
+
+// ── 13.8 仓库只读化：重扫 / 新装默认关闭 / 删除级联 ──────────────────
 // 契约（2026-10-21）：
 //   · 扩展落地后首次加载默认关闭，等会话管理里显式启用
 //   · 仓库页删除 = 磁盘目录 + 全局配置 + 所有会话里的同名覆盖，三处一起清
 // 这里用临时目录（skills/__cov_*）跑真实链路，finally 必删。
-c.section('13.7 扩展仓库：重扫 / 默认关闭 / 删除级联');
+c.section('13.8 扩展仓库：重扫 / 默认关闭 / 删除级联');
 {
   const EXT_ID = 'covdelx';
   const extDir = path.join(ROOT, 'skills', EXT_ID);

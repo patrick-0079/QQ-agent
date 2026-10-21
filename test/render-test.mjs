@@ -180,11 +180,22 @@ const ctx = vm.createContext(sandbox);
       loaded: false, enabled: true, available: false, active: false, code: 'skill-not-loaded',
       reason: '加载失败：入口文件不存在：index.js', capabilities: [], requires: [], missingRequires: [],
       toolIds: [], lastError: 'SyntaxError: 意外的标记', deprecated: true },
+    // 需要先配置才能用：仓库页应渲染成橙色（mcard-config）+ 文字原因
+    { id: 'cfg-skill', name: '待配置技能', version: '1.0.0', category: 'utility', description: '缺 Key', source: 'skill',
+      kind: 'skill', dir: 'skills/cfg-skill',
+      loaded: true, enabled: false, available: false, active: false, code: 'skill-unavailable',
+      reason: '缺少 API Key', needsConfig: true, configReason: '缺少 API Key',
+      capabilities: [], requires: [], missingRequires: [], toolIds: [] },
     // 一个正常插件：验证插件页确实能渲染出插件（而不只是"非空字符串"）
     { id: 'ok-plugin', name: '正常插件', version: '1.0.0', category: 'media', description: '提供能力', source: 'plugin',
       kind: 'plugin', dir: 'plugins/ok-plugin',
       loaded: true, enabled: true, available: true, active: true, code: null, reason: '',
-      capabilities: ['media.transcribe'], requires: [], missingRequires: [], toolIds: [] }
+      capabilities: ['media.transcribe'], requires: [], missingRequires: [], toolIds: [] },
+    { id: 'cfg-plugin', name: '待配置插件', version: '1.0.0', category: 'utility', description: '缺 URL', source: 'plugin',
+      kind: 'plugin', dir: 'plugins/cfg-plugin',
+      loaded: true, enabled: false, available: false, active: false, code: 'skill-unavailable',
+      reason: '缺少服务地址', needsConfig: true, configReason: '缺少服务地址',
+      capabilities: [], requires: [], missingRequires: [], toolIds: [] }
   ])};`, ctx);
   vm.runInContext(`state.skillsSummary = ${JSON.stringify({ total: 5, active: 2, disabled: 1, broken: 1, capabilities: ['llm.request-params'] })};`, ctx);
 
@@ -258,6 +269,29 @@ const ctx = vm.createContext(sandbox);
       fail++;
       console.log(`  FAIL  ${fnName} 抛错: ${e && e.message}`);
     }
+  }
+
+  // ── 仓库页计数标签 + 需配置橙色提示（2026-10-21）─────────────────────
+  console.log('\n=== 仓库页：计数标签 / 需配置提示 ===');
+  try {
+    const skillsHtml = (ctx.renderSkillsPage || sandbox.renderSkillsPage)();
+    const pluginsHtml = (ctx.renderPluginsPage || sandbox.renderPluginsPage)();
+    const tagOk = skillsHtml.includes('共 4 个技能') && pluginsHtml.includes('共 3 个插件')
+      && !/生效<\/span>/.test(skillsHtml);
+    tagOk ? pass++ : fail++;
+    console.log('  ' + (tagOk ? 'OK   ' : 'FAIL ') + '标签为「共 N 个技能/插件」');
+    const cfgOk = skillsHtml.includes('mcard-config')
+      && skillsHtml.includes('需配置')
+      && skillsHtml.includes('需要配置：缺少 API Key')
+      && pluginsHtml.includes('mcard-config');
+    cfgOk ? pass++ : fail++;
+    console.log('  ' + (cfgOk ? 'OK   ' : 'FAIL ') + '需配置的卡片为橙色并带文字原因');
+    const brokenOk = pluginsHtml.includes('mcard-broken') && skillsHtml.includes('mcard-on');
+    brokenOk ? pass++ : fail++;
+    console.log('  ' + (brokenOk ? 'OK   ' : 'FAIL ') + '加载失败仍为红色、正常项仍为绿色');
+  } catch (e) {
+    fail++;
+    console.log('  FAIL  仓库标签/需配置检查抛错: ' + (e && e.message));
   }
 
   // ── 仓库页：只读 + 删除按钮 + 搜索框常驻（2026-10-21 改版）────────────

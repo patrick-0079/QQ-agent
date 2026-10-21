@@ -143,9 +143,13 @@ function setCard(opts) {
 /* 自动把「h3 分组 / settings-divider 分段」收成折叠卡
    —— 覆盖未手动包 setCard 的设置区块，实现「设置项下拉框收纳」。 */
 function autoFoldSettings(root) {
-  const form = (root && root.id === 'settings-form') ? root
-    : (root && root.querySelector && root.querySelector('#settings-form'))
-      || document.getElementById('settings-form');
+  // 设置页与会话管理各自有一个渲染宿主：必须按**本次渲染的 root** 绑定折叠，
+  // 否则会话设置（#cm-settings）会去折叠设置页的 #settings-form（空表单/另一页）。
+  const renderRoot = root && (root.id === 'settings-form' || root.id === 'cm-settings') ? root : null;
+  const form = renderRoot
+    || (root && root.querySelector && (root.querySelector('#settings-form') || root.querySelector('#cm-settings')))
+    || document.getElementById('settings-form')
+    || document.getElementById('cm-settings');
   if (!form) return;
   // 已是折叠卡结构（显式 setCard）：只绑定交互
   if (form.querySelector(':scope > .setcard.fold, :scope > .setcard')) {

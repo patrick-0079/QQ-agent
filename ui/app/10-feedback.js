@@ -879,10 +879,9 @@ $('#session-clear-btn')?.addEventListener('click', async () => {
   }
 });
 
-// 会话列表「群发」：选若干群/私聊（或全选），发一条同样的消息。
-// 走已存在的 /api/chats/:kind_:id/test-send 逐个发送（它会把消息记进存档，
-// 与手动测试消息同一口径）；逐个发、逐个报结果，失败不中断后续目标。
-$('#session-broadcast-btn')?.addEventListener('click', async () => {
+// 会话管理左栏「群发」：选若干群/私聊（或全选），发一条同样的消息。
+// 走已存在的 /api/chats/:kind_:id/test-send 逐个发送（失败不中断后续目标）。
+async function openBroadcastModal() {
   let groups = [], friends = [];
   try {
     const [g, f] = await Promise.all([api('/api/onebot/groups'), api('/api/onebot/friends')]);
@@ -958,6 +957,6 @@ $('#session-broadcast-btn')?.addEventListener('click', async () => {
     sendBtn.disabled = false;
     setTimeout(close, 1600);
   });
-});
+}
 
 

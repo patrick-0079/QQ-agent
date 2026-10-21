@@ -92,6 +92,49 @@ await check('zip 根目录剥离：服务端格式 <id>/... 剥掉一层', async
   assert.ok(fs.existsSync(path.join(root, 'skills', 'fake-skill', 'plugin.json')), '剥前缀后文件应在目录根部');
 });
 
+await check('多套一层外壳目录（wrapper/<id>/skill.json）也能装到根部', async () => {
+  const wrapper = path.join(tmp, 'wrap-stage', 'wrapper');
+  const modDir = path.join(wrapper, 'nested-skill');
+  fs.mkdirSync(modDir, { recursive: true });
+  fs.writeFileSync(path.join(modDir, 'skill.json'), JSON.stringify({ id: 'nested-skill', name: '嵌套技能' }));
+  fs.writeFileSync(path.join(modDir, 'index.js'), 'export function setup() {}\n');
+  // zip 的根 = wrapper/ → 条目变成 wrapper/nested-skill/...
+  const zipped = await __zipDirectory(wrapper);
+  const root = path.join(tmp, 'root-nested');
+  const name = await unzipToModuleDir(zipped, { root, type: 'skill' });
+  assert.equal(name, 'nested-skill', `应识别到真正的模块目录，实际 ${name}`);
+  assert.ok(fs.existsSync(path.join(root, 'skills', name, 'skill.json')), '清单必须落在安装目录根部');
+  assert.ok(fs.existsSync(path.join(root, 'skills', name, 'index.js')), '入口文件也必须落在根部');
+});
+
+await check('深层外壳（a/b/<id>/plugin.json）也能识别模块根', async () => {
+  const a = path.join(tmp, 'deep-stage', 'a');
+  const modDir = path.join(a, 'b', 'deep-plugin');
+  fs.mkdirSync(modDir, { recursive: true });
+  fs.writeFileSync(path.join(modDir, 'plugin.json'), JSON.stringify({ id: 'deep-plugin', name: '深层插件' }));
+  fs.writeFileSync(path.join(modDir, 'index.js'), 'export function setup() {}\n');
+  const zipped = await __zipDirectory(a);   // 条目：a/b/deep-plugin/...
+  const root = path.join(tmp, 'root-deep');
+  const name = await unzipToModuleDir(zipped, { root, type: 'plugin' });
+  assert.equal(name, 'deep-plugin');
+  assert.ok(fs.existsSync(path.join(root, 'plugins', name, 'plugin.json')));
+});
+
+await check('没有清单的包：报可读错误且不留下半装目录', async () => {
+  const junk = path.join(tmp, 'junk-stage', 'junk');
+  fs.mkdirSync(junk, { recursive: true });
+  fs.writeFileSync(path.join(junk, 'readme.txt'), 'nothing here');
+  const zipped = await __zipDirectory(junk);
+  const root = path.join(tmp, 'root-junk');
+  fs.mkdirSync(path.join(root, 'skills'), { recursive: true });
+  await assert.rejects(
+    () => unzipToModuleDir(zipped, { root, type: 'skill', preferId: 'junk' }),
+    /未找到 skill\.json \/ plugin\.json/
+  );
+  const left = fs.readdirSync(path.join(root, 'skills'));
+  assert.deepEqual(left, [], `失败安装不能留残骸，实际：${left.join(', ')}`);
+});
+
 await check('含可执行文件的 zip 被拒绝（打包端拦截 + 解压端拦截双保险）', async () => {
   const evil = path.join(tmp, 'evil');
   fs.mkdirSync(evil, { recursive: true });

@@ -1435,11 +1435,13 @@ td b, .tbl td b { color: var(--tx); font-weight: 600; }
 /* 口令安装：逐行口令，校验状态（checking/ok/bad）直接长在行上 */
 #ic-rows { display: flex; flex-direction: column; gap: 8px; }
 .ic-row {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px;
   padding: 7px 9px; border-radius: var(--r-sm);
   background: var(--bg2); border: 1px solid var(--bd);
   transition: border-color .16s ease, background-color .16s ease, opacity .16s ease;
 }
+.ic-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ic-err { color: var(--err); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .ic-row.checking { border-color: var(--ac-line); }
 .ic-row.ok { border-color: var(--ok-line); background: var(--ok-soft); }
 .ic-row.bad { border-color: var(--err-line); background: var(--err-soft); }
@@ -1878,6 +1880,11 @@ details.collapsible.coll-shut > summary::after { transform: rotate(0deg); }
 .settings-pane-inner {
   height: 100%; overflow-y: auto; padding: 4px 4px 40px;
   overscroll-behavior: contain;
+  box-sizing: border-box;
+  /* 与 .settings-pane 同款合成层隔离：会话设置开关插件会触发整块 DOM 重建，
+     深滚动时 Chromium 会把滚动偏移记到整窗 surface，表现为“下半部分空白/黑块”。 */
+  transform: translateZ(0);
+  overflow-anchor: none;
 }
 
 /* 会话管理右栏用量 */
@@ -1945,3 +1952,44 @@ details.collapsible.coll-shut > summary::after { transform: rotate(0deg); }
 }
 .mcard-del:hover { color: var(--err); border-color: var(--err-line); background: var(--err-soft); }
 .mcard-del:disabled { opacity: .5; cursor: default; }
+
+/* 仓库卡片：需要先配置 / 缺少依赖（橙色提示） */
+.mcard-config { border-color: var(--warn-line); background: var(--warn-soft); }
+.mcard-badge-config {
+  font-size: 10.5px; padding: 0 6px; border-radius: 999px; margin-left: 6px;
+  border: 1px solid var(--warn-line); color: var(--warn); background: transparent;
+  font-weight: 600;
+}
+.mcard-config .mcard-err { color: var(--warn); }
+
+/* ══ 会话管理左栏：宽度可调 + 纵向滚动 + 名称截断 ══ */
+#cm-rail {
+  --cm-rail-w: 280px;
+  width: var(--cm-rail-w);
+  flex: 0 0 var(--cm-rail-w);
+  position: relative;
+  overflow: hidden;
+  padding-right: 12px;
+}
+#cm-rail .cm-rail-head { flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; }
+#cm-rail .session-menu {
+  flex: 1 1 auto; min-height: 0; max-height: none;
+  overflow-y: auto; overflow-x: hidden;
+}
+#cm-rail .settings-runstate { margin-bottom: 6px; }
+#cm-rail .chat-row-text { flex: 1; min-width: 0; }
+#cm-rail .chat-row-name { min-width: 0; }
+.chat-row-title { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-row-name .chat-def-tag, .chat-row-name .chat-deny-tag { flex: 0 0 auto; }
+.cm-rail-actions { display: flex; gap: 6px; margin: 6px 0 2px; }
+.cm-rail-actions .btn { flex: 1 1 0; white-space: nowrap; padding-left: 6px; padding-right: 6px; }
+.cm-rail-resizer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 7px;
+  cursor: col-resize; z-index: 5; touch-action: none;
+}
+.cm-rail-resizer::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+  background: transparent; transition: background-color .14s ease, width .14s ease;
+}
+.cm-rail-resizer:hover::after, .cm-rail-resizer.dragging::after { background: var(--ac); width: 2px; }
+.cm-rail-resizer:hover, .cm-rail-resizer.dragging { background: var(--ac-soft); }

@@ -775,13 +775,18 @@ const SNOWLUMA_CONNECT_FORM = (c) => `
  * 拉取技能/插件列表（内存态）。**不含磁盘重扫** —— 想让新放入的目录
  * 被看到，走 rescanSkills()。
  */
-async function loadSkillsStatus() {
+/**
+ * 拉取技能/插件列表（内存态）。**不含磁盘重扫** —— 想让新放入的目录
+ * 被看到，走 rescanSkills()。
+ *
+ * @param {{ chat?: string|null }} opts
+ *   chat = 会话 key 时返回“该会话生效值”（仅会话管理 → 设置 → 工具与技能使用）；
+ *   仓库页必须显式传 null（全局默认）—— 依赖 isSessionScope() 隐式判断会在
+ *   离开会话管理后仍带着旧作用域，把仓库卡片错误地渲染成绿色。
+ */
+async function loadSkillsStatus({ chat = null } = {}) {
   try {
-    // 会话作用域下必须按会话取：enabled 是"该会话的生效值"，
-    // 拉全局会把会话级开关显示成全局默认（看起来像点了没生效）。
-    const scope = (typeof isSessionScope === 'function' && isSessionScope())
-      ? `?chat=${encodeURIComponent(state.settingsScope)}`
-      : '';
+    const scope = chat ? `?chat=${encodeURIComponent(chat)}` : '';
     const data = await api(`/api/skills${scope}`);
     state.skills = data.skills || [];
     state.skillsSummary = data.summary || {};
@@ -1077,15 +1082,15 @@ function renderModulePage(kind) {
         <input type="search" class="module-search" id="module-search-${esc(meta.tab)}"
           placeholder="搜索${meta.kind === 'skill' ? '技能' : '插件'}名称 / 简介 / 分类…" autocomplete="off" />
         <div class="usage-days">
-          <span class="uc-tag" title="生效中 / 这一页的总数">${mine.active} / ${mine.total} 生效</span>
+          <span class="uc-tag" title="本页安装总数">共 ${mine.total} 个${meta.kind === 'skill' ? '技能' : '插件'}</span>
           <button class="btn btn-small" id="${esc(meta.tab)}-refresh-btn">刷新</button>
         </div>
       </div>
       <div class="hint" style="margin-bottom:14px">
         ${meta.lead}<br />
-        本页只做仓库管理（安装 / 删除 / 参数）。<b>启停按会话走</b>：到「会话管理 → 选中会话 → 设置 → 工具与技能」里开；
+        本页只做仓库管理（安装 / 删除 / 参数），显示的是<b>全局默认</b>状态。<b>启停按会话走</b>：到「会话管理 → 选中会话 → 设置 → 工具与技能」里开；
         「默认会话」里的开关就是全局默认。<br />
-        不可用时卡片上会直接写明原因（未启用 / 缺依赖 / 模型不支持 / 加载失败）。
+        需要先填配置才能用的会标成橙色（<b>需配置</b>）；加载失败的标红，卡片上会直接写明原因。
       </div>`;
 
   if (!items.length) {
@@ -1114,15 +1119,27 @@ function renderModulePage(kind) {
   const card = (s) => {
     const loadedOk = s.loaded;
     const active = loadedOk && s.enabled && s.active;
-    const stateCls = !loadedOk ? 'mcard-broken' : (!s.enabled ? 'mcard-off' : (active ? 'mcard-on' : 'mcard-dep'));
+    // 状态优先级：加载失败(红) > 需配置/缺依赖(橙) > 已生效(绿) > 已关闭(灰) > 启用但依赖未就绪(橙)
+    const needsConfig = loadedOk && s.needsConfig === true;
+    const missingDeps = loadedOk && s.missingDeps === true;
+    const configIssue = needsConfig || missingDeps;
+    const stateCls = !loadedOk ? 'mcard-broken'
+      : (configIssue ? 'mcard-config'
+        : (!s.enabled ? 'mcard-off' : (active ? 'mcard-on' : 'mcard-dep')));
     // 仓库页只读：不再提供"点卡片切开关"，开关统一在会话管理里按会话开。
     const stateTitle = !loadedOk ? `加载失败：${s.loadError || '原因未知'}`
-      : (!s.enabled ? '已关闭（到「会话管理 → 设置 → 工具与技能」里启用）'
-        : (active ? '已启用（按会话生效）' : `已启用但依赖未就绪：${s.reason || (s.missingRequires || []).join('、') || '原因未知'}`));
+      : needsConfig ? `需要配置：${s.configReason || '请先填写配置'}（点 ⚙ 填写后再到会话管理启用）`
+        : missingDeps ? `缺少依赖：${s.depsReason || (s.missingRequires || []).join('、') || '请先安装提供依赖的扩展'}`
+          : (!s.enabled ? '已关闭（到「会话管理 → 设置 → 工具与技能」里启用）'
+            : (active ? '已启用（按会话生效）' : `已启用但依赖未就绪：${s.reason || (s.missingRequires || []).join('、') || '原因未知'}`));
     // 无法真正生效时，把原因写在卡片上（不再只藏在 title 提示里）
     let errLine = '';
     if (!loadedOk) {
       errLine = String(s.loadError || '加载失败，原因未知').slice(0, 160);
+    } else if (needsConfig) {
+      errLine = `需要配置：${String(s.configReason || '请先填写配置（点 ⚙）').slice(0, 150)}`;
+    } else if (missingDeps) {
+      errLine = `缺少依赖：${String(s.depsReason || (s.missingRequires || []).join('、') || '需先安装提供依赖的扩展').slice(0, 150)}`;
     } else if (s.enabled && !s.active) {
       errLine = String(s.reason || (s.missingRequires || []).map((r) => `缺少能力：${r}`).join('、') || '依赖未就绪').slice(0, 160);
     }
@@ -1138,7 +1155,7 @@ function renderModulePage(kind) {
     return `
     <div class="mcard ${stateCls}" data-skill-id="${esc(s.id)}" data-search="${esc(haystack)}" title="${esc(stateTitle)}">
       <div class="mcard-main">
-        <div class="mcard-name">${esc(s.name)} <span class="skill-card__ver">v${esc(s.version)}</span></div>
+        <div class="mcard-name">${esc(s.name)} <span class="skill-card__ver">v${esc(s.version)}</span>${configIssue ? '<span class="mcard-badge-config">需配置</span>' : ''}</div>
         ${(s.toolIds || []).length ? `<div class="mcard-tools" title="本技能注册的工具 id">${(s.toolIds || []).map((id) => `<code class="mcard-tool-id">${esc(id)}</code>`).join('')}</div>` : ''}
         <div class="mcard-desc">${esc(s.description || '（没有写介绍）')}</div>
         ${errLine ? `<div class="mcard-err">${esc(errLine)}</div>` : ''}
@@ -1371,7 +1388,7 @@ function renderToolsSection(c) {
   // 会话级技能/插件开关：文件全局一份，启停按会话记（profile overrides）。
   // 「默认会话」= 全局默认，影响所有没单独配置的会话。
   // 技能与插件拆成两个独立分区，各自带搜索（不再混在一张长列表里）。
-  const scopeLabel = isSessionScope() ? '本会话' : '默认会话';
+  const scopeLabel = isSessionScope() ? '本会话' : '默认设置';
   const moduleCard = ({ key, kindLabel, list }) => {
     const rows = list.map((s) => {
       const loaded = s.loaded !== false;
@@ -1397,7 +1414,7 @@ function renderToolsSection(c) {
       id: `card-scope-${key}`,
       icon: key === 'skills' ? '🧩' : '🔌',
       title: `${scopeLabel}启用的${kindLabel}`,
-      sub: `已启用 ${onCount} / 共 ${list.length}`,
+      sub: `已启用 ${onCount} / 共 ${list.length}${isSessionScope() ? '' : '（影响所有未单独配置的会话）'}`,
       open: true,
       body: `
         <div class="scope-search-row">

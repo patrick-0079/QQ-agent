@@ -574,17 +574,21 @@ function openAddModuleModal(kind) {
 }
 
 /**
- * 口令安装模态框：逐行输入口令，失焦校验；
- * 「就这些吧」批量下载解压到对应目录（类型由服务器决定）。
+ * 口令安装模态框：
+ *   · 输入一个口令按回车 → 自动出现下一个输入框（可连续录入多个）
+ *   · 点「就这些吧」→ 批量校验 + 逐个安装；失败行变红并就地显示原因
+ *   · 全部成功才关闭弹窗；有失败保留弹窗，可修改后重试
+ * 类型（技能/插件）由服务器决定，会装进各自的仓库页。
  */
 function openInstallCodeModal() {
-  let codeRows = [];   // [{ code, status: 'idle'|'checking'|'ok'|'bad', entry }]
+  let codeRows = [];   // [{ code, status: 'idle'|'installing'|'ok'|'bad', entry, error }]
+  let busy = false;
   const overlay = modelModalShell({
     head: '口令安装',
     body: `
       <div class="hint" style="margin-bottom:10px">
         在市场页找到想要的技能/插件，点「复制口令！」，把得到的口令填进来。
-        每行一个；填完一行会自动校验。输完点「就这些吧」批量安装。
+        <b>输入一个按回车</b>会继续出现下一个输入框，可以连续录多个；输完点「就这些吧」依次安装。
         <span class="muted">（技能口令和插件口令都行 —— 类型由服务器决定，会装进各自的页签）</span>
       </div>
       <div id="ic-rows"></div>
@@ -595,93 +599,186 @@ function openInstallCodeModal() {
   });
   const rowsBox = overlay.querySelector('#ic-rows');
   const statusBox = overlay.querySelector('#ic-status');
+  const setStatus = (text, isErr = false) => {
+    statusBox.textContent = text || '';
+    statusBox.style.color = isErr ? 'var(--err)' : '';
+  };
+  const blankRow = () => ({ code: '', status: 'idle', entry: null, error: '' });
 
   const renderRows = () => {
     rowsBox.innerHTML = codeRows.map((r, i) => {
-      const cls = r.status === 'ok' ? ' ok' : (r.status === 'bad' ? ' bad' : (r.status === 'checking' ? ' checking' : ''));
-      const dim = r.status === 'ok' ? ' dim' : (r.status === 'bad' ? '' : '');
+      const cls = r.status === 'ok' ? ' ok' : (r.status === 'bad' ? ' bad' : (r.status === 'installing' ? ' checking' : ''));
       const badge = r.status === 'ok'
         ? `<span class="ic-check">✅</span><span class="ic-meta">${esc(r.entry?.name || '')}<span class="muted"> · ${esc(r.entry?.author || '')} · ${r.entry?.type === 'plugin' ? '插件' : '技能'}</span></span>`
         : '';
-      return `<div class="ic-row${cls}${dim}">
-        <input type="text" class="ic-input" data-idx="${i}" value="${esc(r.code)}"
-          placeholder="${r.status === 'ok' ? '已匹配' : '输入 6 位口令'}"
-          autocomplete="off" spellcheck="false" ${r.status === 'ok' ? 'readonly' : ''} />
-        <button class="ic-del" data-idx="${i}" title="删除这行" aria-label="删除第 ${i + 1} 行">🗑</button>
-        ${badge}
+      const editable = r.status !== 'ok' && !busy;
+      return `<div class="ic-row${cls}">
+        <div class="ic-line">
+          <input type="text" class="ic-input" data-idx="${i}" value="${esc(r.code)}"
+            placeholder="${r.status === 'ok' ? '已安装' : '输入口令，回车继续下一个'}"
+            autocomplete="off" spellcheck="false" ${editable ? '' : 'readonly'} />
+          ${r.status === 'ok' ? '' : `<button class="ic-del" data-idx="${i}" title="删除这行" aria-label="删除第 ${i + 1} 行" ${busy ? 'disabled' : ''}>🗑</button>`}
+          ${badge}
+        </div>
+        ${r.error ? `<div class="ic-err">${esc(r.error)}</div>` : ''}
       </div>`;
     }).join('');
-    // 绑定输入：失焦且有内容 → 触发校验 + 追加新行
+
     rowsBox.querySelectorAll('.ic-input').forEach((inp) => {
-      inp.addEventListener('blur', async () => {
+      inp.addEventListener('input', () => {
         const idx = Number(inp.dataset.idx);
+        const row = codeRows[idx];
+        if (!row) return;
+        row.code = inp.value;
+        if (row.status === 'bad') { row.status = 'idle'; row.error = ''; }
+      });
+      inp.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.isComposing || busy) return;
+        e.preventDefault();
+        const idx = Number(inp.dataset.idx);
+        const row = codeRows[idx];
+        if (!row) return;
         const code = inp.value.trim().toUpperCase();
         if (!code) return;
-        if (codeRows[idx]?.code === code && codeRows[idx]?.status === 'ok') return;
-        codeRows[idx] = { code, status: 'checking', entry: null };
+        row.code = code;
+        if (row.status === 'bad') { row.status = 'idle'; row.error = ''; }
+        // 在最后一行回车才追加新行；中间行回车只跳到下一行
+        if (idx === codeRows.length - 1) codeRows.push(blankRow());
         renderRows();
-        try {
-          const r = await api('/api/market/verify', { method: 'POST', body: JSON.stringify({ codes: [code] }) });
-          const hit = (r.results || [])[0];
-          if (codeRows[idx]?.code !== code) return;   // 期间被删/改过，丢弃结果
-          if (hit?.ok) {
-            codeRows[idx] = { code, status: 'ok', entry: hit };
-            // 失焦且有内容 → 下一行出现（只在没有空行时追加）
-            if (!codeRows.some((x) => !x.code)) codeRows.push({ code: '', status: 'idle', entry: null });
-          } else {
-            codeRows[idx] = { code, status: 'bad', entry: null };
-          }
-        } catch (e) {
-          if (codeRows[idx]?.code === code) codeRows[idx] = { code, status: 'bad', entry: null };
-          statusBox.textContent = `校验失败：${e?.message || e}`;
-        }
-        renderRows();
+        const inputs = [...rowsBox.querySelectorAll('.ic-input')];
+        (inputs[idx + 1] || inputs[idx])?.focus();
       });
     });
+
     rowsBox.querySelectorAll('.ic-del').forEach((btn) => {
       btn.addEventListener('click', () => {
-        codeRows.splice(Number(btn.dataset.idx), 1);
-        if (!codeRows.length) codeRows.push({ code: '', status: 'idle', entry: null });
+        if (busy) return;
+        const idx = Number(btn.dataset.idx);
+        if (codeRows[idx]?.status === 'ok') return;
+        codeRows.splice(idx, 1);
+        if (!codeRows.length) codeRows.push(blankRow());
         renderRows();
       });
     });
-  };
-  codeRows.push({ code: '', status: 'idle', entry: null });
-  renderRows();
-
-  overlay.querySelector('#ic-cancel')?.addEventListener('click', () => closeModelModal(overlay));
-  overlay.querySelector('#ic-confirm')?.addEventListener('click', async () => {
-    const btn = overlay.querySelector('#ic-confirm');
-    const ready = codeRows.filter((r) => r.status === 'ok' && r.entry);
-    if (!ready.length) {
-      statusBox.textContent = '还没有成功对接的口令（先把口令填对，等它变绿带 ✅）。';
-      return;
-    }
-    btn.disabled = true;
-    let installed = 0;
-    const notes = [];
-    for (const r of ready) {
-      statusBox.textContent = `正在安装 ${installed + 1}/${ready.length}：${r.entry?.name || r.code}…`;
-      try {
-        const res = await api('/api/market/install', {
-          method: 'POST',
-          body: JSON.stringify({ code: r.code, entry: r.entry })
-        });
-        installed++;
-        notes.push(`${res.kind === 'plugin' ? '插件' : '技能'} ${res.id} 已安装`);
-      } catch (e) {
-        notes.push(`${r.entry?.name || r.code} 安装失败：${e?.message || e}`);
+    // 恢复焦点到最后一行（重绘会丢焦点）
+    if (!busy) {
+      const inputs = [...rowsBox.querySelectorAll('.ic-input')].filter((el) => !el.readOnly);
+      const last = inputs[inputs.length - 1];
+      if (last && document.activeElement !== last && rowsBox.contains(last)) {
+        const focusIdx = last.dataset.idx;
+        if (focusIdx != null) last.focus({ preventScroll: true });
       }
     }
-    statusBox.textContent = installed
-      ? `安装完成：${installed} 个。${notes.join('；')}`
-      : `全部失败。${notes.join('；')}`;
-    btn.disabled = false;
-    if (installed) {
-      // 刷新两个页签（安装的类型可能在另一页）
-      await loadModulePage('skill', { rescan: true }).catch(() => {});
-      await loadModulePage('plugin', { rescan: true }).catch(() => {});
-      setTimeout(() => closeModelModal(overlay), 1200);
+  };
+  codeRows.push(blankRow());
+  renderRows();
+
+  overlay.querySelector('#ic-cancel')?.addEventListener('click', () => {
+    if (!busy) closeModelModal(overlay);
+  });
+
+  overlay.querySelector('#ic-confirm')?.addEventListener('click', async () => {
+    if (busy) return;
+    const btn = overlay.querySelector('#ic-confirm');
+    // 1) 收集 + 本地格式校验
+    const filled = codeRows.filter((r) => String(r.code || '').trim());
+    if (!filled.length) { setStatus('先输入至少一个口令，再点「就这些吧」。', true); return; }
+    const badFmt = filled.filter((r) => !/^[A-Z0-9]{4,12}$/.test(String(r.code).trim().toUpperCase()));
+    if (badFmt.length) {
+      for (const r of badFmt) { r.status = 'bad'; r.error = '口令格式无效（4~12 位字母或数字）'; }
+      renderRows();
+      setStatus(`有 ${badFmt.length} 个口令格式不对，已标红。`, true);
+      return;
+    }
+    // 2) 归一 + 去重
+    const seen = new Set();
+    const todo = [];
+    for (const r of filled) {
+      const code = String(r.code).trim().toUpperCase();
+      r.code = code;
+      if (seen.has(code)) { r.status = 'bad'; r.error = '重复口令（已忽略）'; continue; }
+      seen.add(code);
+      if (r.status !== 'ok') todo.push(r);
+    }
+    if (!todo.length) {
+      renderRows();
+      setStatus('没有需要安装的口令（已成功的不会重复安装）。');
+      return;
+    }
+
+    busy = true;
+    btn.disabled = true;
+    setStatus(`正在校验 ${todo.length} 个口令…`);
+    renderRows();
+    let okCount = 0;
+    let failCount = 0;
+    try {
+      // 3) 批量校验（一次请求拿到 type/name/author，install 时回传给后端）
+      let results = [];
+      try {
+        const vr = await api('/api/market/verify', {
+          method: 'POST',
+          body: JSON.stringify({ codes: todo.map((r) => r.code) })
+        });
+        results = vr.results || [];
+      } catch (e) {
+        for (const r of todo) { r.status = 'bad'; r.error = `校验失败：${String(e?.message || e).slice(0, 100)}`; }
+        failCount = todo.length;
+        throw e;
+      }
+      const byCode = new Map();
+      results.forEach((hit, idx) => {
+        const key = String(hit?.code || todo[idx]?.code || '').toUpperCase();
+        if (key) byCode.set(key, hit);
+      });
+      // 4) 逐个安装（失败不中断后面的）
+      for (let i = 0; i < todo.length; i++) {
+        const r = todo[i];
+        const hit = byCode.get(r.code);
+        if (!hit || !hit.ok) {
+          r.status = 'bad';
+          r.error = String(hit?.error || '口令无效或已下架').slice(0, 120);
+          failCount++;
+          setStatus(`正在安装 ${i + 1}/${todo.length}：${r.code}（失败）`);
+          renderRows();
+          continue;
+        }
+        r.status = 'installing';
+        r.error = '';
+        r.entry = hit;
+        setStatus(`正在安装 ${i + 1}/${todo.length}：${hit.name || r.code}…`);
+        renderRows();
+        try {
+          await api('/api/market/install', {
+            method: 'POST',
+            body: JSON.stringify({ code: r.code, entry: hit })
+          });
+          r.status = 'ok';
+          r.entry = hit;
+          okCount++;
+        } catch (e) {
+          r.status = 'bad';
+          r.error = String(e?.message || e).slice(0, 120);
+          failCount++;
+        }
+        renderRows();
+      }
+    } catch { /* 校验整批失败：上面已标红，走统一汇总 */ } finally {
+      busy = false;
+      btn.disabled = false;
+      renderRows();
+    }
+
+    // 5) 刷新两个仓库页（安装的类型可能在另一页）
+    await Promise.allSettled([
+      loadModulePage('skill', { rescan: true }),
+      loadModulePage('plugin', { rescan: true })
+    ]);
+    if (failCount === 0) {
+      setStatus(`全部安装成功（${okCount} 个），正在关闭…`);
+      setTimeout(() => closeModelModal(overlay), 700);
+    } else {
+      setStatus(`安装完成：成功 ${okCount} 个，失败 ${failCount} 个；红色行可修改后重试。`, true);
     }
   });
   return overlay;

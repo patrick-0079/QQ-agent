@@ -188,10 +188,10 @@ export class SkillManager {
       try {
         const r = skill.available(context);
         if (r === false) {
-          return { ok: false, code: SKILL_ERROR.UNAVAILABLE, reason: skill.availableReason || '依赖不满足' };
+          return { ok: false, code: SKILL_ERROR.UNAVAILABLE, reason: skill.availableReason || '自检未通过（点 ⚙ 检查配置）' };
         }
         if (r && typeof r === 'object' && r.ok === false) {
-          return { ok: false, code: SKILL_ERROR.UNAVAILABLE, reason: String(r.reason || '依赖不满足'), detail: r.detail };
+          return { ok: false, code: SKILL_ERROR.UNAVAILABLE, reason: String(r.reason || '自检未通过（点 ⚙ 检查配置）'), detail: r.detail };
         }
       } catch (error) {
         return { ok: false, code: SKILL_ERROR.UNAVAILABLE, reason: `自检异常：${error?.message ?? error}` };
@@ -234,6 +234,12 @@ export class SkillManager {
     const enabled = this.isEnabled(id);
     const a = this.isActive(id, context);
     const missing = (m.requires || []).filter((cap) => !this.capabilities.has(cap));
+    // 与 enabled 无关的“能不能用”自检：仓库页据此提示“需要配置 / 缺少依赖”。
+    // 必须在 enabled 判定之外单独跑 —— isActive 对关闭状态会提前返回 skill-disabled，
+    // 拿不到插件 available() 给出的“缺 Key / 缺 URL”等配置原因。
+    const availCheck = this.isAvailable(id, context);
+    const needsConfig = !skill.loadError && !availCheck.ok && availCheck.code === SKILL_ERROR.UNAVAILABLE;
+    const missingDeps = !skill.loadError && !availCheck.ok && availCheck.code === SKILL_ERROR.CAPABILITY_MISSING;
     return {
       id: m.id,
       name: m.name,
@@ -277,6 +283,11 @@ export class SkillManager {
       configSchema: (m.configSchema && typeof m.configSchema === 'object') ? m.configSchema : {},
       requires: [...(m.requires || [])],
       missingRequires: missing,
+      // 仓库页提示（与启停无关）：需要先填配置 / 缺少依赖提供者
+      needsConfig,
+      configReason: needsConfig ? String(availCheck.reason || '需要先填写配置') : '',
+      missingDeps,
+      depsReason: missingDeps ? String(availCheck.reason || '') : '',
       toolIds: [...(skill.toolIds || [])]
     };
   }

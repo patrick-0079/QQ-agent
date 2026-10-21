@@ -49,6 +49,59 @@ function withCmScope(path) {
   return path + (path.includes('?') ? '&' : '?') + q;
 }
 
+// ── 左栏宽度（会话管理专用）──────────────────────────────────────────
+const CM_RAIL_W_KEY = 'qqa-cm-rail-width';
+const CM_RAIL_W_MIN = 200;
+const CM_RAIL_W_MAX = 520;
+const CM_RAIL_W_DEF = 280;
+
+function readCmRailWidth() {
+  try {
+    const v = Number(localStorage.getItem(CM_RAIL_W_KEY));
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch { /* 隐私模式忽略 */ }
+  return CM_RAIL_W_DEF;
+}
+
+function applyCmRailWidth(px) {
+  const w = Math.round(Math.min(CM_RAIL_W_MAX, Math.max(CM_RAIL_W_MIN, Number(px) || CM_RAIL_W_DEF)));
+  const rail = $('#cm-rail');
+  if (rail) rail.style.setProperty('--cm-rail-w', `${w}px`);
+  try { localStorage.setItem(CM_RAIL_W_KEY, String(w)); } catch { /* ignore */ }
+  return w;
+}
+
+/** 左栏右缘拖拽调宽（双击复位）。左栏 innerHTML 每次重绘都会重建 handle，故按元素绑定。 */
+function initCmRailResizer() {
+  const rail = $('#cm-rail');
+  const handle = $('#cm-rail-resizer');
+  if (!rail || !handle) return;
+  applyCmRailWidth(readCmRailWidth());
+  if (handle.__resizeBound) return;
+  handle.__resizeBound = true;
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = rail.getBoundingClientRect().width || readCmRailWidth();
+    try { handle.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing-list');
+    const onMove = (ev) => applyCmRailWidth(startW + (ev.clientX - startX));
+    const onUp = (ev) => {
+      handle.classList.remove('dragging');
+      document.body.classList.remove('resizing-list');
+      try { handle.releasePointerCapture(ev.pointerId); } catch { /* ignore */ }
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  });
+  handle.addEventListener('dblclick', () => applyCmRailWidth(CM_RAIL_W_DEF));
+}
+
 // ── 子页签 ───────────────────────────────────────────────────────────
 function renderCmSubtabs() {
   const box = $('#cm-subtabs');

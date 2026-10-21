@@ -110,6 +110,30 @@ async function main() {
   assert.equal(mgr.isActive('needs-cap').active, true, '依赖被满足后应生效');
   ok('依赖被满足后自动生效（能力优先于名字）');
 
+  // ══ 3.5 仓库“需配置 / 缺依赖”状态（与启停无关）══════════════════════
+  mgr.register({
+    manifest: normalizeManifest({ id: 'cfg-skill', name: '缺配置技能' }).manifest,
+    available: () => ({ ok: false, reason: '缺少 API Key' })
+  });
+  const cfgSt = mgr.status('cfg-skill');
+  assert.equal(cfgSt.needsConfig, true, 'available() 报缺配置时应标记 needsConfig');
+  assert.equal(cfgSt.missingDeps, false, '不应误标为缺依赖');
+  assert.equal(cfgSt.configReason, '缺少 API Key', '应带出插件自检的具体原因');
+  assert.equal(cfgSt.loaded, true, '已加载但缺配置');
+
+  mgr.register({
+    manifest: normalizeManifest({ id: 'needs-dep2', name: '缺依赖技能', requires: ['missing.cap2'] }).manifest
+  });
+  const depSt = mgr.status('needs-dep2');
+  assert.equal(depSt.missingDeps, true, '缺能力时应标记 missingDeps');
+  assert.equal(depSt.needsConfig, false, '不应误标为需配置');
+  assert.ok(depSt.depsReason.includes('missing.cap2'), `依赖原因应点名能力：${depSt.depsReason}`);
+
+  const okSt = mgr.status('provides-cap');
+  assert.equal(okSt.needsConfig, false, '正常技能不应误报需配置');
+  assert.equal(okSt.missingDeps, false, '正常技能不应误报缺依赖');
+  ok('仓库“需配置 / 缺依赖”状态区分正确');
+
   // ══ 4. 关闭 Skill → 能力与工具同时失效 ══════════════════════════════
   clearRegistry();
   // 工具 id 必须符合 OpenAI 函数名规范（registerTool 入口已强制），测试用 __ 分隔

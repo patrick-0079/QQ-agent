@@ -12,6 +12,7 @@
 //   npm i -D jsdom      # 启用本测试
 //
 // 运行：node test/coverage-wiring.mjs
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -191,6 +192,105 @@ for (const sub of ['sessions', 'chats', 'memory', 'usage', 'settings']) {
   await sleep(700);
   cov[`会话管理/${sub}`] = scan(`会话管理/${sub}`);
 }
+
+// 左栏控件：添加会话 / 群发（都在搜索框上方）+ 宽度拖拽把手
+await c.check('会话管理左栏：添加/群发/宽度拖拽已就位并接线', () => {
+  const rail = window.document.querySelector('#cm-rail');
+  assert.ok(rail, '缺少左栏 #cm-rail');
+  for (const id of ['chat-session-add-btn', 'session-broadcast-btn', 'chat-session-search', 'cm-rail-resizer']) {
+    assert.ok(rail.querySelector(`#${id}`), `左栏缺少 #${id}`);
+  }
+  const order = [...rail.querySelectorAll('#chat-session-add-btn, #session-broadcast-btn, #chat-session-search')]
+    .map((el) => el.id);
+  assert.deepEqual(order, ['chat-session-add-btn', 'session-broadcast-btn', 'chat-session-search'],
+    `添加/群发应排在搜索框上方，实际顺序：${order.join(' → ')}`);
+  assert.ok(wired(rail.querySelector('#chat-session-add-btn')), '添加会话没接线');
+  assert.ok(wired(rail.querySelector('#session-broadcast-btn')), '群发没接线');
+  const rz = listeners.get(rail.querySelector('#cm-rail-resizer'));
+  assert.ok(rz && rz.has('pointerdown'), '宽度拖拽把手没接线（pointerdown）');
+  assert.ok(rail.style.getPropertyValue('--cm-rail-w'), '左栏宽度变量未应用');
+});
+
+// 会话设置的折叠卡：autoFoldSettings 必须绑定到 #cm-settings（而不是设置页表单）
+await c.check('会话设置里的折叠卡可以正常开合', async () => {
+  window.switchCmSub('settings');
+  await sleep(700);
+  const toolsTab = window.document.querySelector('[data-session-section="tools"]');
+  if (toolsTab) { toolsTab.click(); await sleep(500); }
+  const card = window.document.querySelector('#cm-settings .setcard.fold');
+  assert.ok(card, '会话设置里没有折叠卡');
+  const head = card.querySelector('.fold-head');
+  assert.ok(head, '折叠卡缺少 .fold-head');
+  const before = card.classList.contains('open');
+  head.click();
+  await sleep(60);
+  assert.notEqual(card.classList.contains('open'), before, '点击折叠卡头没有开合');
+});
+
+// 口令安装：回车只追加输入框，不联网
+await c.check('口令安装：回车追加下一个输入框（不触发网络）', async () => {
+  const ov = window.openInstallCodeModal();
+  const inputs = () => [...ov.querySelectorAll('#ic-rows .ic-input')];
+  assert.equal(inputs().length, 1, `初始应只有 1 个输入框，实际 ${inputs().length}`);
+  const first = inputs()[0];
+  first.value = 'ABCD12';
+  first.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await sleep(120);
+  assert.equal(inputs().length, 2, `回车后应有 2 个输入框，实际 ${inputs().length}`);
+  assert.equal(inputs()[0].value, 'ABCD12', '已输入的口令不能被清掉');
+  window.closeModelModal(ov);
+});
+
+// 口令安装：格式不对时标红并保留弹窗（不联网）
+await c.check('口令安装：失败项红色提示且弹窗不关闭', async () => {
+  const ov = window.openInstallCodeModal();
+  const first = ov.querySelector('#ic-rows .ic-input') || ov.querySelector('.ic-input');
+  if (!first) throw new Error(`输入框未渲染：${ov.innerHTML.slice(0, 200)}`);
+  first.value = 'AB';
+  first.dispatchEvent(new window.Event('input', { bubbles: true }));
+  ov.querySelector('#ic-confirm').click();
+  await sleep(150);
+  const bad = ov.querySelector('.ic-row.bad');
+  if (!bad) throw new Error('格式错误的口令没有标红');
+  if (!/口令格式无效/.test(bad.textContent)) throw new Error(`红色原因不明确：${bad.textContent}`);
+  if (!ov.isConnected) throw new Error('有失败项时弹窗不应关闭');
+  window.closeModelModal(ov);
+});
+
+// 会话里启用插件后：仓库卡片必须仍是“全局关闭”，不能变绿
+await c.check('会话启用插件不污染仓库（卡片仍为全局关闭）', async () => {
+  const doc = window.document;
+  await window.api('/api/chat-profiles', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'group', id: '990001', alias: '仓库回归测试群' })
+  });
+  window.switchTab('chatmanage');
+  await sleep(500);
+  await window.loadChatProfiles({ quiet: true });
+  window.renderSettingsSidebar();
+  window.selectCmScope('group:990001');
+  await sleep(900);
+  window.switchCmSub('settings');
+  await sleep(1200);
+  doc.querySelector('[data-session-section="tools"]')?.click();
+  await sleep(600);
+  const row = [...doc.querySelectorAll('.skill-scope-row')]
+    .find((el) => String(el.dataset.search || '').includes('sticker-memory'));
+  if (!row) throw new Error('会话设置里找不到 sticker-memory 行');
+  const cb = row.querySelector('input.skill-scope-toggle');
+  cb.click();
+  await sleep(1200);
+  if (doc.body.textContent.includes('切换失败')) throw new Error('切换插件时报错了');
+  const cfg = await window.api('/api/config');
+  if (cfg.skills?.['sticker-memory']?.enabled === true) throw new Error('会话开关污染了全局配置');
+  window.switchTab('plugins');
+  await sleep(1500);
+  const card = doc.querySelector('#plugins-page .mcard[data-skill-id="sticker-memory"]');
+  if (!card) throw new Error('插件仓库里找不到 sticker-memory 卡片');
+  if (card.classList.contains('mcard-on')) throw new Error('仓库卡片因会话启用而变绿（作用域泄漏）');
+  window.switchTab('chatmanage');
+  await sleep(600);
+});
 const defItem = window.document.querySelector('#chat-default-item');
 if (defItem) {
   defItem.click();
@@ -347,4 +447,3 @@ await ctx.teardown();
 try { window.close(); } catch { /* ignore */ }
 try { dom.window.close(); } catch { /* ignore */ }
 process.exit(c.finish() ? 0 : 1);
-
