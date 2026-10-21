@@ -289,6 +289,12 @@ c.section('8. Skill 开关与工具联动');
     const skillToolCount = probe.data.tools.filter((t) => t.skillId).length;
     if (skillToolCount > 0) {
     await c.check('已加载 Skill 的工具带 skillId，且工具可用性与技能开关一致', async () => {
+      // 2026-10-21：扩展落地后默认关闭（等用户显式启用）。先显式启用全部已加载
+      // 扩展，否则"已启用且工具可用"的候选为空 —— 那是新策略下的正确状态，不是缺陷。
+      const before = await request('GET', '/api/skills');
+      for (const s of (before.data.skills || []).filter((x) => x.loaded)) {
+        await request('POST', `/api/skills/${encodeURIComponent(s.id)}`, { body: { enabled: true } });
+      }
       const skillsRes = await request('GET', '/api/skills');
       const enabledOf = new Map((skillsRes.data.skills || []).map((s) => [s.id, s.enabled === true]));
       const r = await request('GET', '/api/tools/availability');

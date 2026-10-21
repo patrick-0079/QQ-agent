@@ -353,7 +353,12 @@ function renderSessionSettingsSection(c) {
 /** 当前分区是否被（该会话）覆盖。 */
 function isSectionOverridden() {
   if (state.settingsView !== 'session' || state.settingsScope === 'default') return false;
-  return Boolean((state.scopeOverrides || {})[sessionSectionNow()]);
+  const ov = state.scopeOverrides || {};
+  const sec = sessionSectionNow();
+  if (ov[sec]) return true;
+  // 「工具与技能」分区里还嵌着会话级技能/插件开关（overrides.skills），
+  // 只改过技能开关时也要能亮出"恢复默认"。
+  return sec === 'tools' && Boolean(ov.skills);
 }
 
 /** 在分区菜单行尾挂"恢复默认 | 本项已自定义"标记（渲染后调用，一次即可）。 */
@@ -370,6 +375,10 @@ function mountSessionRestoreButton() {
       if (!(await uiConfirm(`确定恢复「${label}」为默认设置？\n\n这个会话对该分区的自定义将被清除（其余分区不受影响）。`))) return;
       try {
         await api(`/api/chat-profiles/${profileUrl(state.settingsScope)}/overrides/${section}`, { method: 'DELETE' });
+        // 「工具与技能」把技能/插件开关也算在内：一并恢复，否则按钮点了还会亮着
+        if (section === 'tools') {
+          await api(`/api/chat-profiles/${profileUrl(state.settingsScope)}/overrides/skills`, { method: 'DELETE' }).catch(() => {});
+        }
         await refreshScopeAfterWrite();
         showAppAlert('已恢复默认设置', { kind: 'info' });
       } catch (e) { showAppAlert(`恢复失败：${e.message}`); }

@@ -60,18 +60,40 @@ function renderCmSubtabs() {
   });
 }
 
+/** 当前是不是"只可能有一个目标"的会话（默认会话之外）。 */
+function cmIsSingleScope() {
+  return state.tab === 'chatmanage' && Boolean(state.cmScope) && state.cmScope !== 'default';
+}
+
+/** 存档/记忆在单会话下不需要左侧栏（只有一个目标，直接看内容）。 */
+function applyCmSingleScopeLayout() {
+  const single = cmIsSingleScope();
+  $$('.cm-panel[data-cm-panel="chats"], .cm-panel[data-cm-panel="memory"]')
+    .forEach((p) => p.classList.toggle('cm-single-scope', single));
+}
+
 /** 切换子页：面板显隐 + 按当前会话口径拉数据。 */
-function switchCmSub(sub) {
+async function switchCmSub(sub) {
   const next = CM_SUBTABS.some(([id]) => id === sub) ? sub : 'sessions';
   if (state.cmSub === 'settings' && next !== 'settings') flushSettingsSaves();
   state.cmSub = next;
   $$('.cm-panel').forEach((p) => p.classList.toggle('active', p.dataset.cmPanel === next));
   $$('#cm-subtabs [data-cm-sub]').forEach((b) => b.classList.toggle('active', b.dataset.cmSub === next));
+  applyCmSingleScopeLayout();
   renderSettingsSidebar();
   if (next === 'sessions') loadSessions();
-  else if (next === 'chats') loadChats();
-  else if (next === 'memory') loadMemoryView();
-  else if (next === 'usage') loadCmUsage();
+  else if (next === 'chats') {
+    await loadChats({ quiet: true });
+    // 单会话：列表里只有它自己，直接选中并展示消息
+    if (cmIsSingleScope() && state.currentChatKey !== state.cmScope) await selectChat(state.cmScope);
+  } else if (next === 'memory') {
+    await loadMemoryView();
+    if (cmIsSingleScope() && state.currentMemoryChatKey !== state.cmScope) {
+      state.currentMemoryChatKey = state.cmScope;
+      renderMemoryList();
+      loadMemoryDetail(state.cmScope);
+    }
+  } else if (next === 'usage') loadCmUsage();
   else if (next === 'settings') loadCmSettings();
 }
 
@@ -86,6 +108,7 @@ function selectCmScope(key) {
   }
   if (state.cmSub === 'settings') flushSettingsSaves();
   state.cmScope = next;
+  applyCmSingleScopeLayout();
   // 右栏详情属于上一个会话：切走就清空，避免看串
   state.currentSessionId = null;
   state.currentChatKey = null;
@@ -114,6 +137,7 @@ function selectCmScope(key) {
 function enterChatManage() {
   // 左栏会话列表可能还没拉过（首屏直接落在本页）：异步补齐，回来自己重绘
   void loadChatProfiles({ quiet: true });
+  applyCmSingleScopeLayout();
   renderSettingsSidebar();
   renderCmSubtabs();
   switchCmSub(state.cmSub);

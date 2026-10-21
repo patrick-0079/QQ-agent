@@ -49,3 +49,7 @@ release/
 community.key
 
 .goal-baseline/
+
+# 三方技能和插件
+skills/
+plugins/

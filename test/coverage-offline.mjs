@@ -1273,4 +1273,32 @@ c.section('15. gif-to-video.js GIF 转视频（含奇数尺寸回归）');
   });
 }
 
+// ── 16. chat-profiles：扩展删除时清理所有会话的同名配置 ─────────────────
+c.section('16. chat-profiles：purgeSkillFromProfiles');
+{
+  const { setProfileOverrides, purgeSkillFromProfiles, getProfile } = await import('../src/chat-profiles.js');
+
+  await c.check('删除扩展时清掉它会话覆盖，其它技能/分区原样保留', () => {
+    setProfileOverrides('group:7001', { skills: { a: { enabled: true }, b: { enabled: false } } });
+    setProfileOverrides('group:7002', { skills: { a: { enabled: true } }, persona: { roleText: '人设' } });
+    setProfileOverrides('group:7003', { persona: { roleText: '无关会话' } });
+
+    const n = purgeSkillFromProfiles('a');
+    assert.equal(n, 2, `应清理 2 个会话，实际 ${n}`);
+
+    const p1 = getProfile('group:7001');
+    assert.ok(!p1.overrides.skills?.a, '目标技能应被删掉');
+    assert.equal(p1.overrides.skills?.b?.enabled, false, '同会话的其它技能不受影响');
+
+    const p2 = getProfile('group:7002');
+    assert.ok(!p2.overrides.skills, 'skills 清空后整个分区应被删掉（不留空对象）');
+    assert.equal(p2.overrides.persona?.roleText, '人设', '其它分区不受影响');
+
+    const p3 = getProfile('group:7003');
+    assert.deepEqual(p3.overrides, { persona: { roleText: '无关会话' } }, '没有该技能的会话保持原样');
+
+    assert.equal(purgeSkillFromProfiles('a'), 0, '重复清理应为 0（幂等）');
+  });
+}
+
 c.finish();

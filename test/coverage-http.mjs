@@ -1241,6 +1241,98 @@ c.section('13.6 黑名单优先级 / 默认会话口径');
   });
 }
 
+// ── 13.7 仓库只读化：重扫 / 新装默认关闭 / 删除级联 ──────────────────
+// 契约（2026-10-21）：
+//   · 扩展落地后首次加载默认关闭，等会话管理里显式启用
+//   · 仓库页删除 = 磁盘目录 + 全局配置 + 所有会话里的同名覆盖，三处一起清
+// 这里用临时目录（skills/__cov_*）跑真实链路，finally 必删。
+c.section('13.7 扩展仓库：重扫 / 默认关闭 / 删除级联');
+{
+  const EXT_ID = 'covdelx';
+  const extDir = path.join(ROOT, 'skills', EXT_ID);
+  const GHOST_ID = 'covghostx';
+
+  const writeFixture = () => {
+    fs.mkdirSync(extDir, { recursive: true });
+    fs.writeFileSync(path.join(extDir, 'skill.json'), JSON.stringify({
+      id: EXT_ID,
+      name: '覆盖删除测试扩展',
+      version: '1.0.0',
+      category: 'utility',
+      description: 'coverage-http 临时扩展：验证默认关闭与删除级联（跑完自动删除）'
+    }), 'utf8');
+    fs.writeFileSync(path.join(extDir, 'index.js'),
+      'export function setup() { /* 不注册任何工具/能力：只测安装与删除链路 */ }\n', 'utf8');
+  };
+  const removeFixture = () => { try { fs.rmSync(extDir, { recursive: true, force: true }); } catch { /* ignore */ } };
+
+  try {
+    writeFixture();
+
+    await c.check('POST /api/skills/reload：能重扫磁盘（回归 getGlobalConfig 未导入的 500）', async () => {
+      const r = await hit('POST', '/api/skills/reload');
+      assert.equal(r.status, 200, `重扫应 200，实际 ${r.status} ${r.text}`);
+      assert.ok(Array.isArray(r.data.loaded), '应返回 loaded 列表');
+      assert.ok(r.data.loaded.includes(EXT_ID), `重扫应加载新扩展：${r.data.loaded.join(',')}`);
+    });
+
+    await c.check('新落地扩展默认关闭（不自动启用）', async () => {
+      const list = await hit('GET', '/api/skills');
+      const row = list.data.skills.find((s) => s.id === EXT_ID);
+      assert.ok(row, '新扩展应出现在列表里');
+      assert.equal(row.loaded, true, '扩展应加载成功');
+      assert.equal(row.enabled, false, '新落地扩展必须默认关闭，等用户显式启用');
+    });
+
+    await c.check('DELETE /api/skills/:id：删目录 + 清全局配置 + 清所有会话的同名覆盖', async () => {
+      // 造一个"已启用它"的会话覆盖
+      await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '999001', alias: '删除级联测试群' } });
+      const put = await hit('PUT', '/api/chat-profiles/group:999001/overrides', {
+        body: { overrides: { skills: { [EXT_ID]: { enabled: true } } } }
+      });
+      assert.equal(put.status, 200, `写会话覆盖应 200，实际 ${put.status}`);
+      const del = await hit('DELETE', `/api/skills/${EXT_ID}`);
+      assert.equal(del.status, 200, `删除应 200，实际 ${del.status} ${del.text}`);
+      assert.equal(del.data.ok, true);
+      assert.ok(del.data.removedSessions >= 1, `应清理至少 1 个会话，实际 ${del.data.removedSessions}`);
+      assert.equal(fs.existsSync(extDir), false, '磁盘目录必须被删除');
+      const prof = await hit('GET', '/api/chat-profiles/group:999001');
+      assert.ok(!prof.data.overrides?.skills?.[EXT_ID], '所有会话里的同名开关必须被清掉');
+      const cfg = await hit('GET', '/api/config');
+      assert.ok(!cfg.data.skills?.[EXT_ID], '全局配置里的 skills[id] 必须被删掉');
+      const list = await hit('GET', '/api/skills');
+      assert.ok(!list.data.skills.some((s) => s.id === EXT_ID), '注册表里不应再有它');
+    });
+
+    await c.check('DELETE /api/skills/:id：不存在的扩展返回 404', async () => {
+      const r = await hit('DELETE', '/api/skills/no-such-extension-xyz');
+      assert.equal(r.status, 404);
+    });
+
+    await c.check('清理残留配置也会清掉所有会话里的同名开关', async () => {
+      // 先写会话覆盖、再写全局配置：反过来的话"与默认一致"的最小化逻辑
+      // 会把会话覆盖直接省掉（存不下来就无从中测起）。
+      await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '999002' } });
+      await hit('PUT', '/api/chat-profiles/group:999002/overrides', {
+        body: { overrides: { skills: { [GHOST_ID]: { enabled: true } } } }
+      });
+      // 全局配置里有、磁盘上没有 = "已配置但未安装"的残留条目
+      await hit('POST', '/api/config', { body: { skills: { [GHOST_ID]: { enabled: true } } } });
+      const clean = await hit('POST', '/api/skills/cleanup', { body: { ids: [GHOST_ID] } });
+      assert.equal(clean.status, 200, `清理应 200，实际 ${clean.status} ${clean.text}`);
+      assert.ok(clean.data.removed.includes(GHOST_ID));
+      assert.ok(clean.data.removedSessions >= 1, '应报告清理了多少个会话');
+      const prof = await hit('GET', '/api/chat-profiles/group:999002');
+      assert.ok(!prof.data.overrides?.skills?.[GHOST_ID], '会话里的残留开关必须被清掉');
+    });
+  } finally {
+    removeFixture();
+    try { await hit('POST', '/api/skills/reload'); } catch { /* ignore */ }
+    try { await hit('DELETE', '/api/chat-profiles/group:999001'); } catch { /* ignore */ }
+    try { await hit('DELETE', '/api/chat-profiles/group:999002'); } catch { /* ignore */ }
+  }
+}
+
 // ── 14. 破坏性接口（放这里：会清空数据目录，必须在所有只读断言之后） ─────
 c.section('14. 破坏性接口（最后执行）');
 {
@@ -1315,3 +1407,4 @@ c.section('15. 接口覆盖率统计');
 
 await ctx.teardown();
 c.finish();
+

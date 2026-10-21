@@ -19,9 +19,10 @@ import {
   patchProfileOverrides, clearProfileSection,
   effectiveConfigForChat, withChatScope, isChatAdmitted,
   isSkillWantedAnywhere, isValidChatKey, makeChatKey, isChatDenied,
-  profiledChatKeys,
+  profiledChatKeys, purgeSkillFromProfiles,
   listProfiles as listAllProfiles
 } from './chat-profiles.js';
+import { SKILL_DIRS } from './plugin-loader.js';
 import { customSearch } from './web-search.js';
 import { listModels, chatCompletion, resolveApiKey, estimateCost, cacheHitRate } from './llm.js';
 import { resolveOfficialPrice, listOfficialPrices } from './model-prices.js';
@@ -1049,11 +1050,65 @@ export function createRoutes(deps) {
         for (const id of removable) delete next[id];
         // deepMerge 传 {} 删不掉已有键，必须用 __replace__ 整体替换
         updateConfig({ skills: { __replace__: next } });
+        // 会话里留着的同名开关/设置也一并清掉：扩展都删了，这些只会是脏配置
+        let removedSessions = 0;
+        for (const id of removable) removedSessions += purgeSkillFromProfiles(id);
         emit('status', { configUpdated: true });
         return json(res, 200, {
           ok: true,
           removed: removable,
+          removedSessions,
           skipped: ids.filter((id) => installed.has(id)),
+          config: sanitizeConfig(getConfig())
+        });
+      }
+    },
+    {
+      // 删除一个已安装的技能/插件（仓库页「删除」按钮）。
+      // 级联三处，缺一不可：
+      //   ① 磁盘目录（skills/<id> 或 plugins/<id>）
+      //   ② 全局配置 config.skills[id]
+      //   ③ 所有会话 profile 里的 overrides.skills[id]
+      // 安全闸：只允许删 SKILL_DIRS 之下、且不是根本身的目录 —— 防止越界删除。
+      method: 'DELETE', pattern: /^\/api\/skills\/([^/]+)$/,
+      handler: async ({ res, json, match }) => {
+        const id = decodeURIComponent(match[1]);
+        const skill = skillManager.registry.get(id);
+        if (!skill) return json(res, 404, { ok: false, error: `Skill 不存在：${id}` });
+        const roots = [SKILL_DIRS.skills, SKILL_DIRS.plugins].map((p) => path.resolve(p));
+        const dir = path.resolve(String(skill.dir || ''));
+        const inside = roots.some((root) => dir.startsWith(root + path.sep));
+        if (!skill.dir || !inside) {
+          return json(res, 400, {
+            ok: false,
+            error: `拒绝删除：目录不在 skills/ 或 plugins/ 下（${skill.dir || '未知'}）`
+          });
+        }
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+        } catch (error) {
+          // 文件被占用/权限不足：配置保持原样，避免出现"配置删了文件还在"的半删状态
+          return json(res, 500, { ok: false, error: `删除目录失败：${String(error?.message ?? error)}` });
+        }
+        // ② 全局配置
+        const skillsCfg = getConfig()?.skills || {};
+        const next = { ...skillsCfg };
+        delete next[id];
+        updateConfig({ skills: { __replace__: next } });
+        // ③ 所有会话的覆盖
+        const removedSessions = purgeSkillFromProfiles(id);
+        // 重新扫描：从注册表移除、清孤儿工具、刷新工具集
+        try {
+          if (typeof reloadSkills === 'function') await reloadSkills({ reason: 'manual-delete' });
+        } catch (error) {
+          log(`[skill] 删除 ${id} 后重扫失败：${error?.message ?? error}`);
+        }
+        emit('status', { configUpdated: true, chatProfilesChanged: true });
+        return json(res, 200, {
+          ok: true,
+          id,
+          dir: String(skill.relDir || skill.dir || ''),
+          removedSessions,
           config: sanitizeConfig(getConfig())
         });
       }

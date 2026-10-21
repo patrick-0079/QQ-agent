@@ -1922,3 +1922,26 @@ details.collapsible.coll-shut > summary::after { transform: rotate(0deg); }
 .skill-scope-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .skill-scope-name b { font-weight: 600; }
 .skill-scope-name .muted { font-size: 12px; }
+
+/* 单会话（存档/记忆）：只有一个目标，不显示左侧列表 */
+.cm-panel.cm-single-scope .cm-split .list-pane { display: none; }
+
+/* 会话级技能/插件分区：搜索框与状态 */
+.scope-search-row { margin-bottom: 10px; }
+.scope-search {
+  width: 100%; padding: 7px 10px; border-radius: var(--r-sm);
+  border: 1px solid var(--bd); background: var(--bg0); color: var(--tx);
+  font-size: 13px; outline: none;
+}
+.scope-search:focus { border-color: var(--ac-line); }
+.scope-search::placeholder { color: var(--tx3); }
+.skill-scope-state { font-size: 11.5px; margin-left: auto; }
+
+/* 仓库卡片：删除按钮（只读仓库的管理动作） */
+.mcard-del {
+  border: 1px solid transparent; background: transparent; color: var(--tx3);
+  border-radius: var(--r-sm); padding: 4px 7px; font-size: 13px; cursor: pointer;
+  line-height: 1;
+}
+.mcard-del:hover { color: var(--err); border-color: var(--err-line); background: var(--err-soft); }
+.mcard-del:disabled { opacity: .5; cursor: default; }

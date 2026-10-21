@@ -589,15 +589,16 @@ return `
       title: '活跃设置',
       sub: '响应档位 / 峰谷',
       val: tierSummary(sliderToTierUI_tierToSlider(st)),
-      // 卡头插槽：竖分割线 + 三件套（峰谷时段 / 档位参数 / 统一设置），
+      // 卡头插槽：竖分割线 + 两件套（峰谷时段 / 档位参数），
       // 紧贴标题块左侧排布，与右上角档位摘要之间留白。
+      // 2026-10-21：「统一设置」开关已删除 —— 配置本来就按会话（profile）隔离，
+      // 再放一个"所有群共用/各自设置"的全局开关只会和会话覆盖打架。
       extra: `<span class="ac-head-controls"><span class="ac-head-div"></span>
         <div class="btn ac-peak-btn" id="ac-peak-btn" role="button" tabindex="0" title="点击设置高峰时段（开始 / 结束与预设方案）">
           <span>🌅 峰谷时段</span>
           <label class="switch ac-peak-switch" title="启用 / 停用峰谷切换（高峰时段用高峰档，其余时间用低谷档）"><input type="checkbox" id="ac-peak-enabled" ${st.peakSchedule?.enabled === true ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span></label>
         </div>
         <button class="btn" id="ac-tier-params-btn" title="档位参数：各档条数 / 关键词表 / 被召唤后持续参与">⚙ 档位参数</button>
-        <label class="switch" style="padding:0" title="开 = 所有群共用同一套档位 / 峰谷时段；关 = 每个群单独设置"><input type="checkbox" id="ac-unifiedtier" ${st.unifiedTier !== false ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span><span style="font-size:12px">统一设置</span></label>
       </span>`,
       open: true,
       body: `<div id="ac-editor"></div>`
@@ -1068,15 +1069,29 @@ function renderModulePage(kind) {
     broken: items.filter((s) => !s.loaded).length
   };
 
+  // 页头（两种分支共用）：搜索框必须**常驻** —— 空列表时也要能搜/能添加。
+  // 之前空分支只渲染标题+添加+刷新，用户看到的就是“没有搜索框”。
+  const head = `<div class="usage-head">
+        <h2>${esc(meta.title)}</h2>
+        <button class="btn btn-small" id="${esc(meta.tab)}-add-btn" title="从市场口令安装，或查看自建指南">＋ 添加${meta.kind === 'skill' ? '技能' : '插件'}</button>
+        <input type="search" class="module-search" id="module-search-${esc(meta.tab)}"
+          placeholder="搜索${meta.kind === 'skill' ? '技能' : '插件'}名称 / 简介 / 分类…" autocomplete="off" />
+        <div class="usage-days">
+          <span class="uc-tag" title="生效中 / 这一页的总数">${mine.active} / ${mine.total} 生效</span>
+          <button class="btn btn-small" id="${esc(meta.tab)}-refresh-btn">刷新</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:14px">
+        ${meta.lead}<br />
+        本页只做仓库管理（安装 / 删除 / 参数）。<b>启停按会话走</b>：到「会话管理 → 选中会话 → 设置 → 工具与技能」里开；
+        「默认会话」里的开关就是全局默认。<br />
+        不可用时卡片上会直接写明原因（未启用 / 缺依赖 / 模型不支持 / 加载失败）。
+      </div>`;
+
   if (!items.length) {
     const emptyHtml = `<div class="usage-wrap">
-      <div class="usage-head"><h2>${esc(meta.title)}</h2>
-        <button class="btn btn-small" id="${esc(meta.tab)}-add-btn" title="从市场口令安装，或查看自建指南">＋ 添加${meta.kind === 'skill' ? '技能' : '插件'}</button>
-        <div class="usage-days">
-          <button class="btn btn-small" id="${esc(meta.tab)}-refresh-btn">刷新</button>
-        </div></div>
+      ${head}
       <div class="empty-hint">${meta.emptyHint}</div>
-      <div class="hint" style="margin-top:10px">${meta.lead}</div>
     </div>`;
     if (box) box.innerHTML = emptyHtml;
     bindModulePageEvents(kind);
@@ -1100,9 +1115,10 @@ function renderModulePage(kind) {
     const loadedOk = s.loaded;
     const active = loadedOk && s.enabled && s.active;
     const stateCls = !loadedOk ? 'mcard-broken' : (!s.enabled ? 'mcard-off' : (active ? 'mcard-on' : 'mcard-dep'));
+    // 仓库页只读：不再提供"点卡片切开关"，开关统一在会话管理里按会话开。
     const stateTitle = !loadedOk ? `加载失败：${s.loadError || '原因未知'}`
-      : (!s.enabled ? '已关闭（点击开启）'
-        : (active ? '生效中（点击关闭）' : `已启用但依赖未就绪：${s.reason || (s.missingRequires || []).join('、') || '原因未知'}`));
+      : (!s.enabled ? '已关闭（到「会话管理 → 设置 → 工具与技能」里启用）'
+        : (active ? '已启用（按会话生效）' : `已启用但依赖未就绪：${s.reason || (s.missingRequires || []).join('、') || '原因未知'}`));
     // 无法真正生效时，把原因写在卡片上（不再只藏在 title 提示里）
     let errLine = '';
     if (!loadedOk) {
@@ -1115,16 +1131,19 @@ function renderModulePage(kind) {
       ? `<button class="mcard-gear" data-skill-id="${esc(s.id)}" title="设置（${allFields.length} 项）" aria-label="打开 ${esc(s.name)} 的设置">⚙</button>`
       : '';
     const uploadBtn = `<button class="mcard-upload" data-skill-id="${esc(s.id)}" data-skill-kind="${kind}" title="上传到市场" aria-label="上传 ${esc(s.name)} 到市场">⬆</button>`;
-    const haystack = [s.id, s.name, s.description, s.dir].filter(Boolean).join(' ').toLowerCase();
+    const delBtn = `<button class="mcard-del" data-skill-id="${esc(s.id)}" data-skill-name="${esc(s.name)}" data-skill-kind="${kind}"
+      title="删除（同时清掉所有会话里这个扩展的设置）" aria-label="删除 ${esc(s.name)}">🗑</button>`;
+    const haystack = [s.id, s.name, s.description, s.dir, catLabel[s.category] || s.category]
+      .filter(Boolean).join(' ').toLowerCase();
     return `
-    <div class="mcard ${stateCls}" data-skill-id="${esc(s.id)}" data-search="${esc(haystack)}" role="button" tabindex="0" title="${esc(stateTitle)}">
+    <div class="mcard ${stateCls}" data-skill-id="${esc(s.id)}" data-search="${esc(haystack)}" title="${esc(stateTitle)}">
       <div class="mcard-main">
         <div class="mcard-name">${esc(s.name)} <span class="skill-card__ver">v${esc(s.version)}</span></div>
         ${(s.toolIds || []).length ? `<div class="mcard-tools" title="本技能注册的工具 id">${(s.toolIds || []).map((id) => `<code class="mcard-tool-id">${esc(id)}</code>`).join('')}</div>` : ''}
         <div class="mcard-desc">${esc(s.description || '（没有写介绍）')}</div>
         ${errLine ? `<div class="mcard-err">${esc(errLine)}</div>` : ''}
       </div>
-      <div class="mcard-acts">${uploadBtn}${settingsBtn}</div>
+      <div class="mcard-acts">${uploadBtn}${settingsBtn}${delBtn}</div>
     </div>`;
   };
 
@@ -1140,27 +1159,15 @@ function renderModulePage(kind) {
     ? `<h3 class="usage-h3">已配置但未安装（${state.uninstalledSkills.length}）</h3>
       <div class="hint" style="margin-bottom:6px">这些条目在配置里留着开关/设置，但 <code>skills/</code> 与 <code>plugins/</code> 目录里已经没有对应的文件夹。重装同名插件会自动恢复这些设置；确认不要了可以清理掉。</div>
       <div class="tool-meta" style="gap:6px;margin-bottom:8px">
-        ${state.uninstalledSkills.map((u) => `<span class="tool-dep">${esc(u.id)}${u.enabled ? '' : '（已关）'}${u.hasSettings ? ' · 有设置' : ''}</span>`).join('')}
+        ${state.uninstalledSkills.map((u) => `<span class="tool-dep" data-search-item data-search="${esc(String(u.id).toLowerCase())}">${esc(u.id)}${u.enabled ? '' : '（已关）'}${u.hasSettings ? ' · 有设置' : ''}</span>`).join('')}
       </div>
       <button class="btn btn-small" id="skills-cleanup-btn">清理这些残留配置</button>`
     : '';
 
   const html = `<div class="usage-wrap">
-      <div class="usage-head">
-        <h2>${esc(meta.title)}</h2>
-        <button class="btn btn-small" id="${esc(meta.tab)}-add-btn" title="从市场口令安装，或查看自建指南">＋ 添加${meta.kind === 'skill' ? '技能' : '插件'}</button>
-        <input type="search" class="module-search" id="module-search-${esc(meta.tab)}"
-          placeholder="搜索${meta.kind === 'skill' ? '技能' : '插件'}名称 / 简介…" autocomplete="off" />
-        <div class="usage-days">
-          <span class="uc-tag" title="生效中 / 这一页的总数">${mine.active} / ${mine.total} 生效</span>
-          <button class="btn btn-small" id="${esc(meta.tab)}-refresh-btn">刷新</button>
-        </div>
-      </div>
-      <div class="hint" style="margin-bottom:14px">
-        ${meta.lead}<br />
-        这里的开关是**全局默认** —— 关闭后它注册的工具、提供的能力、提示词片段和请求改写会**同时**失效。
-        不可用时下面会直接写明原因（未启用 / 缺依赖 / 模型不支持 / 加载失败）。<br />
-        只想让某个群/私聊用它：到「会话管理 → 选中会话 → 设置 → 工具与技能」里单独开。
+      ${head}
+      <div id="module-empty-${esc(meta.tab)}" class="hint" style="display:none;margin:10px 0">
+        没有匹配的${meta.kind === 'skill' ? '技能' : '插件'}，换个关键词试试。
       </div>
       ${sections}
       ${uninstalledHtml}
@@ -1189,7 +1196,7 @@ function bindModulePageEvents(kind) {
     const btn = $('#skills-cleanup-btn');
     if (!btn || !state.uninstalledSkills?.length) return;
     const ids = state.uninstalledSkills.map((u) => u.id);
-    if (!(await uiConfirm(`清理 ${ids.length} 个未安装条目的配置（${ids.join('、')}）？\n清理后重装同名插件将恢复默认设置。`))) return;
+    if (!(await uiConfirm(`清理 ${ids.length} 个未安装条目的配置（${ids.join('、')}）？\n会同时清掉所有会话里这些扩展的开关与设置。`))) return;
     btn.disabled = true;
     try {
       const r = await api('/api/skills/cleanup', { method: 'POST', body: JSON.stringify({ ids }) });
@@ -1219,44 +1226,42 @@ function bindModulePageEvents(kind) {
       openMarketUploadModal(btn.dataset.skillKind || kind, btn.dataset.skillId);
     });
   });
-  // ── 整卡即开关：点击卡片任意处切换启停（复用原 skill-toggle 的请求链）──
-  // 键盘可达：Enter/Space 同样触发（role=button + tabindex=0）。
-  scope.querySelectorAll('.mcard').forEach((cardEl) => {
-    const toggle = async () => {
-      const id = cardEl.dataset.skillId;
-      const cur = (state.skills || []).find((s) => s.id === id);
-      if (!cur || !cur.loaded) return;   // 加载失败的条目切不动
-      const next = !cur.enabled;
-      cardEl.style.pointerEvents = 'none';
+  // 删除扩展（🗑）：删目录 + 全局配置 + 所有会话里的同名覆盖，必须二次确认
+  scope.querySelectorAll('.mcard-del').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.skillId;
+      const name = btn.dataset.skillName || id;
+      const label = (btn.dataset.skillKind || kind) === 'plugin' ? '插件' : '技能';
+      if (!(await uiConfirm(`确定删除${label}「${name}」？\n\n会删除 skills/ 或 plugins/ 下的目录，并清掉全局配置与**所有会话**里它的开关/设置。此操作不可撤销。`))) return;
+      btn.disabled = true;
       try {
-        const r = await api(`/api/skills/${encodeURIComponent(id)}`, {
-          method: 'POST',
-          body: JSON.stringify({ enabled: next })
-        });
-        const idx = (state.skills || []).findIndex((s) => s.id === id);
-        if (idx >= 0 && r.skill) state.skills[idx] = r.skill;
-        if (r.config) state.config = r.config;
-        await loadSkillsStatus();
-        renderModulePage(kind);
+        const r = await api(`/api/skills/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        await loadModulePage(kind, { rescan: true });
+        await loadChatProfiles({ quiet: true });
+        renderSettingsSidebar();
+        showAppAlert(`已删除${label}「${name}」${r?.removedSessions ? `，同时清理了 ${r.removedSessions} 个会话里的设置` : ''}`);
       } catch (err) {
-        alert(`切换失败：${err.message}`);
-        cardEl.style.pointerEvents = '';
+        btn.disabled = false;
+        showAppAlert(`删除失败：${err.message}`);
       }
-    };
-    cardEl.addEventListener('click', toggle);
-    cardEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     });
   });
 
-  // 顶部搜索：按卡片 data-search 本地过滤（不整页重绘，保留开关状态与滚动）
+  // 顶部搜索：按 data-search 本地过滤（不整页重绘，保留滚动/焦点）
   const searchInput = scope.querySelector('.module-search');
   if (searchInput) {
     const applyFilter = () => {
       const q = searchInput.value.trim().toLowerCase();
+      let shown = 0;
       scope.querySelectorAll('.mcard').forEach((el) => {
-        const hay = el.dataset.search || '';
-        el.style.display = (!q || hay.includes(q)) ? '' : 'none';
+        const hit = !q || (el.dataset.search || '').includes(q);
+        el.style.display = hit ? '' : 'none';
+        if (hit) shown++;
+      });
+      // 残留配置条目也参与搜索
+      scope.querySelectorAll('[data-search-item]').forEach((el) => {
+        el.style.display = (!q || (el.dataset.search || '').includes(q)) ? '' : 'none';
       });
       // 分类标题：组内卡片被滤光则标题一并藏掉
       scope.querySelectorAll('.module-grid').forEach((grid) => {
@@ -1265,6 +1270,8 @@ function bindModulePageEvents(kind) {
         const h = grid.previousElementSibling;
         if (h && h.classList.contains('usage-h3')) h.style.display = any ? '' : 'none';
       });
+      const emptyHint = scope.querySelector(`#module-empty-${meta.tab}`);
+      if (emptyHint) emptyHint.style.display = (q && shown === 0) ? '' : 'none';
     };
     searchInput.addEventListener('input', applyFilter);
   }
@@ -1363,38 +1370,54 @@ function renderToolsSection(c) {
   const fold = (typeof setCard === 'function') ? setCard : (o) => `<div class="setcard">${o.body}</div>`;
   // 会话级技能/插件开关：文件全局一份，启停按会话记（profile overrides）。
   // 「默认会话」= 全局默认，影响所有没单独配置的会话。
+  // 技能与插件拆成两个独立分区，各自带搜索（不再混在一张长列表里）。
   const scopeLabel = isSessionScope() ? '本会话' : '默认会话';
-  const moduleRows = (state.skills || []).map((s) => {
-    const loaded = s.loaded !== false;
-    const kindLabel = s.kind === 'plugin' ? '插件' : '技能';
-    const reason = loaded ? '' : `<span class="tool-dep-warn">未加载</span>`;
-    return `
-      <div class="skill-scope-row">
-        <div class="skill-scope-name">
-          <b>${esc(s.name || s.id)}</b>
-          <span class="muted">${kindLabel} · ${esc(s.id)}</span>${reason}
+  const moduleCard = ({ key, kindLabel, list }) => {
+    const rows = list.map((s) => {
+      const loaded = s.loaded !== false;
+      const on = s.enabled === true;
+      const reason = loaded ? '' : '<span class="tool-dep-warn">未加载</span>';
+      const hay = [s.id, s.name, s.description, s.category].filter(Boolean).join(' ').toLowerCase();
+      return `
+        <div class="skill-scope-row" data-search="${esc(hay)}">
+          <div class="skill-scope-name">
+            <b>${esc(s.name || s.id)}</b>
+            <span class="muted">${kindLabel} · ${esc(s.id)}</span>${reason}
+            <span class="muted skill-scope-state">${on ? '已启用' : '已关闭'}</span>
+          </div>
+          <label class="switch tool-switch" title="${loaded ? `只对${scopeLabel}生效` : '该扩展未成功加载，无法启用'}">
+            <input type="checkbox" class="skill-scope-toggle" data-skill-id="${esc(s.id)}"
+                   ${on ? 'checked' : ''} ${loaded ? '' : 'disabled'} />
+            <span class="track"><span class="thumb"></span></span>
+          </label>
+        </div>`;
+    }).join('');
+    const onCount = list.filter((s) => s.enabled === true).length;
+    return fold({
+      id: `card-scope-${key}`,
+      icon: key === 'skills' ? '🧩' : '🔌',
+      title: `${scopeLabel}启用的${kindLabel}`,
+      sub: `已启用 ${onCount} / 共 ${list.length}`,
+      open: true,
+      body: `
+        <div class="scope-search-row">
+          <input type="search" class="scope-search" id="scope-search-${key}" data-no-autosave
+                 placeholder="搜索${kindLabel}名称 / id / 简介…" autocomplete="off" />
         </div>
-        <label class="switch tool-switch" title="${loaded ? `只对${scopeLabel}生效` : '该扩展未成功加载，无法启用'}">
-          <input type="checkbox" class="skill-scope-toggle" data-skill-id="${esc(s.id)}"
-                 ${s.enabled ? 'checked' : ''} ${loaded ? '' : 'disabled'} />
-          <span class="track"><span class="thumb"></span></span>
-        </label>
-      </div>`;
-  }).join('') || '<div class="hint">还没有安装技能或插件。</div>';
+        <div class="scope-list">${rows || `<div class="hint">还没有安装${kindLabel}，可到「${kindLabel}仓库」添加。</div>`}</div>
+        <div class="hint scope-empty" style="display:none">没有匹配的${kindLabel}。</div>`
+    });
+  };
+  const allModules = state.skills || [];
+  const skillScopeCards = moduleCard({ key: 'skills', kindLabel: '技能', list: allModules.filter((s) => s.kind !== 'plugin') })
+    + moduleCard({ key: 'plugins', kindLabel: '插件', list: allModules.filter((s) => s.kind === 'plugin') });
   return `
     <h3 id="settings-tools">工具与技能</h3>
     <div class="hint" style="margin-bottom:12px">
       打开开关启用机器人可调用的工具。关闭后模型将无法使用该功能。
       ${toolsCfg.enabled === false ? '<span style="color:var(--red)">⚠️ 全局开关已关闭，所有工具均不可用</span>' : ''}
     </div>
-    ${fold({
-      id: 'card-skill-scope',
-      icon: '🧩',
-      title: `${scopeLabel}启用的技能与插件`,
-      sub: '只影响当前作用域；扩展文件仍是全局一份',
-      open: true,
-      body: moduleRows
-    })}
+    ${skillScopeCards}
     ${fold({
       id: 'card-tools-list',
       icon: '🛠',

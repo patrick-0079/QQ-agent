@@ -45,6 +45,9 @@ function bindSettingsEvents(c) {
   let undoBtn = null;
 
   function markDirty(el) {
+    // 纯界面筛选框（技能/插件搜索）不是配置项：不能触发自动保存，
+    // 否则每敲一个字都会发一次整段保存、还可能被重渲染打断输入。
+    if (el?.closest?.('[data-no-autosave]')) return;
     const block = el?.closest?.('.field, .checkbox-row, .tier-param, .price-card, .tool-card, .settings-runstate, .prompt-preview-card, .persona-per-chat, .persona-chat-btn');
     if (block) dirtyEls.add(block);
     showUndoBtn();
@@ -225,6 +228,24 @@ function bindSettingsEvents(c) {
       } finally {
         cb.disabled = false;
       }
+    });
+  });
+
+  // ── 会话级技能/插件搜索（两个分区各一个）──
+  // 只在 DOM 内筛行：不重渲染，避免打字时丢焦点/打断开关状态。
+  $$('.scope-search').forEach((input) => {
+    input.addEventListener('input', () => {
+      const card = input.closest('.setcard');
+      if (!card) return;
+      const q = input.value.trim().toLowerCase();
+      let shown = 0;
+      card.querySelectorAll('.skill-scope-row').forEach((row) => {
+        const hit = !q || (row.dataset.search || '').includes(q);
+        row.style.display = hit ? '' : 'none';
+        if (hit) shown++;
+      });
+      const empty = card.querySelector('.scope-empty');
+      if (empty) empty.style.display = (q && shown === 0) ? '' : 'none';
     });
   });
 

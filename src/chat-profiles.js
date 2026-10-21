@@ -294,6 +294,33 @@ export function clearProfileSection(key, section) {
   return { profile: deepClone(p), cleared: true };
 }
 
+/**
+ * 从**所有会话**的覆盖里删掉某个技能/插件的开关与设置。
+ *
+ * 用于扩展被删除（仓库删除按钮 / 清理残留配置）：文件都没了，
+ * 各会话里留着 `skills.<id>` 只会变成永远不可用的脏配置。
+ *
+ * @returns {number} 被清理的会话数
+ */
+export function purgeSkillFromProfiles(id) {
+  const sid = String(id);
+  const profiles = { ...currentProfiles() };
+  let purged = 0;
+  for (const [key, p] of Object.entries(profiles)) {
+    const skills = p?.overrides?.skills;
+    if (!skills || !Object.prototype.hasOwnProperty.call(skills, sid)) continue;
+    const nextSkills = { ...skills };
+    delete nextSkills[sid];
+    const nextOverrides = { ...(p.overrides || {}) };
+    if (Object.keys(nextSkills).length) nextOverrides.skills = nextSkills;
+    else delete nextOverrides.skills;
+    profiles[key] = { ...p, overrides: nextOverrides, updatedAt: Date.now() };
+    purged++;
+  }
+  if (purged) writeProfiles(profiles);
+  return purged;
+}
+
 /** 移除会话条目（= 不再准入，acceptAllSessions=false 时）。聊天/记忆数据不动。 */
 export function removeProfile(key) {
   const parsed = parseChatKey(key);

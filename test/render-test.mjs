@@ -260,6 +260,59 @@ const ctx = vm.createContext(sandbox);
     }
   }
 
+  // ── 仓库页：只读 + 删除按钮 + 搜索框常驻（2026-10-21 改版）────────────
+  // 背景：仓库页曾经整卡可点 = 切全局开关；现在只做仓库管理，启停去会话管理。
+  // 另：空列表分支曾经没有搜索框，用户看到的就是"页面没搜索"。
+  console.log('\n=== 仓库页：只读 + 删除 + 搜索常驻 ===');
+  for (const [fnName, tab, kindLabel] of [
+    ['renderSkillsPage', 'skills', '技能'],
+    ['renderPluginsPage', 'plugins', '插件']
+  ]) {
+    const fn = ctx[fnName] || sandbox[fnName];
+    if (typeof fn !== 'function') { fail++; console.log(`  FAIL  ${fnName} 未定义`); continue; }
+    try {
+      const out = fn();
+      const hasSearch = out.includes(`id="module-search-${tab}"`);
+      const hasDelete = /class="mcard-del"/.test(out);
+      const readOnly = !/class="mcard [^"]*"[^>]*role="button"/.test(out);
+      const ok = hasSearch && hasDelete && readOnly;
+      ok ? pass++ : fail++;
+      console.log(`  ${ok ? 'OK   ' : 'FAIL '} ${fnName}() 搜索框=${hasSearch} 删除按钮=${hasDelete} 只读=${readOnly}（${kindLabel}）`);
+    } catch (e) {
+      fail++;
+      console.log(`  FAIL  ${fnName}() 抛错: ${e && e.message}`);
+    }
+  }
+  // 空列表也必须渲染搜索框
+  try {
+    const prevSkills = vm.runInContext('JSON.stringify(state.skills || [])', ctx);
+    vm.runInContext('state.skills = [];', ctx);
+    const out = (ctx.renderSkillsPage || sandbox.renderSkillsPage)();
+    vm.runInContext('state.skills = ' + prevSkills + ';', ctx);
+    const ok = out.includes('id="module-search-skills"') && out.includes('empty-hint');
+    ok ? pass++ : fail++;
+    console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '空列表也渲染搜索框（不再出现"没搜索框"）');
+  } catch (e) {
+    fail++;
+    console.log('  FAIL  空列表搜索框检查抛错: ' + (e && e.message));
+  }
+
+  // ── 会话设置：技能/插件两个独立分区，各自带搜索 ──────────────────────
+  console.log('\n=== 会话级技能/插件分区 + 搜索 ===');
+  try {
+    const fn = ctx.renderToolsSection || sandbox.renderToolsSection;
+    if (typeof fn !== 'function') throw new Error('renderToolsSection 未定义');
+    const html = fn({ tools: {} });
+    const hasSkillCard = html.includes('card-scope-skills') && html.includes('scope-search-skills');
+    const hasPluginCard = html.includes('card-scope-plugins') && html.includes('scope-search-plugins');
+    const ok = hasSkillCard && hasPluginCard;
+    ok ? pass++ : fail++;
+    console.log(`  ${ok ? 'OK   ' : 'FAIL '} 技能/插件拆成两个分区且各带搜索（技能=${hasSkillCard} 插件=${hasPluginCard}）`);
+  } catch (e) {
+    fail++;
+    console.log('  FAIL  会话级技能/插件分区检查抛错: ' + (e && e.message));
+  }
+
   // 滑条换算函数
   console.log('\n=== 滑条换算（UI 侧）===');
   for (const fnName of ['sliderToTierUI', 'sliderToTierUI_tierToSlider', 'sliderDesc']) {
