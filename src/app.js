@@ -27,8 +27,7 @@ import { extractCandidateUrls, dispatchMediaLinks } from './media-links.js';
 import { createRoutes } from './routes.js';
 import * as instanceLockModule from './instance-lock.js';
 import { logger } from './logger.js';
-import { setSkillConfig } from './skills/config.js';
-import { isChatAdmitted, isChatAdmittedById, isSkillWantedAnywhere } from './chat-profiles.js';
+import { isChatAdmitted, isChatAdmittedById, isSkillWantedAnywhere, purgeSkillFromProfiles } from './chat-profiles.js';
 import { startCommunitySync, isGloballyBlocked, FIXED_PRICE_FEED_URL } from './community.js';
 
 // 全局 fetch（undici）默认连接建立超时只有 10 秒，openrouter.ai 这类海外端点
@@ -1607,26 +1606,61 @@ export function createApp({ log = console.log } = {}) {
   // 看不到新插件。这里把"重扫磁盘 + 激活 + 刷工具 + 重建 watcher"做成一个
   // 幂等函数，启动流程和手动重扫共用，行为完全一致。
   async function reloadSkills({ reason = 'manual' } = {}) {
+    // 记录重扫前已注册的 id：运行时新放进来的目录（即使配置里残留了旧记录）
+    // 也要按“新装默认关闭”处理，见下方 2026-10-21 加固。
+    const beforeIds = new Set(skillManager.registry.list().map((s) => s.manifest?.id).filter(Boolean));
     const result = await loadPlugins({ log });
-    // 2026-10-21：**新落地**（磁盘上刚出现、配置里还没有任何记录）的技能/插件
-    // 默认不启用 —— 无论它是从市场装的还是手工放进目录的，都等用户显式打开。
+    // 2026-10-21：**新落地**的技能/插件默认不启用 —— 无论从市场装、手工放目录，
+    // 还是配置里残留了同名 id 的 enabled:true，都等用户显式打开。
     const skillsCfgNow = getGlobalConfig()?.skills || {};
+    const newlyInstalled = [];
     for (const st of skillManager.list()) {
       if (!st.loaded) continue;
-      if (!skillsCfgNow[st.id] || skillsCfgNow[st.id]?.enabled === undefined) {
-        try { setSkillConfig(st.id, { enabled: false }); } catch { /* 不阻塞 */ }
-        try { skillManager.deactivate(st.id, { reason: 'installed-default-off' }); } catch { /* ignore */ }
-        if (reason !== 'boot') log(`[skill] ${st.id} 已安装（默认关闭，需手动启用）`);
+      const cfgMissing = !skillsCfgNow[st.id] || skillsCfgNow[st.id]?.enabled === undefined;
+      const runtimeNew = reason !== 'boot' && !beforeIds.has(st.id);
+      if (cfgMissing || runtimeNew) newlyInstalled.push(st.id);
+    }
+    if (newlyInstalled.length) {
+      // 一次批量写盘：逐个 setSkillConfig 会产生多次整份配置写回，Windows 上
+      // 与 watcher 抢文件时更容易失败；失败时 isEnabled 会回落到 enabledByDefault。
+      const patch = {};
+      for (const id of newlyInstalled) {
+        patch[id] = { ...(skillsCfgNow[id] && typeof skillsCfgNow[id] === 'object' ? skillsCfgNow[id] : {}), enabled: false };
+      }
+      let writeOk = false;
+      for (let attempt = 0; attempt < 2 && !writeOk; attempt++) {
+        try {
+          updateConfig({ skills: patch });
+          const after = getGlobalConfig()?.skills || {};
+          writeOk = newlyInstalled.every((id) => after[id]?.enabled === false);
+        } catch (error) {
+          if (attempt === 1) log(`[skill] 新装默认关闭写入失败：${error?.message ?? error}`);
+        }
+      }
+      for (const id of newlyInstalled) {
+        try { skillManager.deactivate(id, { reason: 'installed-default-off' }); } catch { /* ignore */ }
+      }
+      // 运行时新目录：清掉所有会话里同名 id 的旧开关，保证“所有会话不开启”。
+      if (reason !== 'boot') {
+        for (const id of newlyInstalled) {
+          if (beforeIds.has(id)) continue;
+          try { purgeSkillFromProfiles(id); } catch { /* ignore */ }
+        }
+      }
+      if (reason !== 'boot') {
+        log(`[skill] 新装默认关闭：${newlyInstalled.join(', ')}${writeOk ? '' : '（配置写入未确认）'}`);
       }
     }
     // 生命周期口径（2026-10-21 会话个性化）：文件只装一份，
     // activate 条件 = 全局默认启用 或 任一会话 profile 启用；
     // 启用状态本身按会话生效（isActive 读作用域配置），不再全局一票否决。
+    const newlySet = new Set(newlyInstalled);
     for (const st of skillManager.list()) {
       if (!st.loaded) continue;
       try {
         const manifest = skillManager.registry.get(st.id)?.manifest;
-        const wanted = isSkillWantedAnywhere(st.id, manifest?.enabledByDefault !== false);
+        // 新装这一轮强制按“默认关闭”判定，即使配置写失败也不会被激活。
+        const wanted = isSkillWantedAnywhere(st.id, newlySet.has(st.id) ? false : manifest?.enabledByDefault !== false);
         if (wanted) skillManager.activate(st.id);
         else skillManager.deactivate(st.id, { reason: 'not-wanted' });
       } catch (error) { log(`[skill] 激活 ${st.id} 失败：${error?.message ?? error}`); }

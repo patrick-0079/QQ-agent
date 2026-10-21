@@ -375,6 +375,27 @@ async function main() {
       assert.equal(r.reasoning, '我在想', '响应里的思考内容应被提取出来');
       assert.deepEqual(r.extraUsage, { reasoningTokens: 3 }, '思考 token 应进入附加统计（不混进成本口径）');
       ok('端到端：请求体被内置思考模块改写 + 响应思考被提取 + 互斥字段被省略');
+
+      // 工具续轮：assistant 消息里的 reasoning_content 必须回传，raw 必须裁掉
+      captured = null;
+      await chatCompletion({
+        messages: [
+          { role: 'user', content: 'hi' },
+          {
+            role: 'assistant', content: null, reasoning_content: '先想一下',
+            tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'x', arguments: '{}' } }],
+            raw: { huge: true }
+          },
+          { role: 'tool', content: 'ok', tool_call_id: 'call_1', name: 'x' }
+        ],
+        overrides: {
+          baseUrl: 'https://api.deepseek.com/v1', apiKey: 'k', model: 'deepseek-reasoner',
+          temperature: 0.8, timeoutMs: 5000, thinkingEffort: 'high'
+        }
+      });
+      const sentAssistant = captured.body.messages.find((m) => m.role === 'assistant');
+      assert.equal(sentAssistant.reasoning_content, '先想一下', '思考续轮必须回传 reasoning_content');
+      assert.equal(Object.prototype.hasOwnProperty.call(sentAssistant, 'raw'), false, 'raw 不能进请求体');
     } finally {
       globalThis.fetch = realFetch;
     }

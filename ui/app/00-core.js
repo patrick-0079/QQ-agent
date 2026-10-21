@@ -45,6 +45,52 @@ function showAppAlert(message) {
 }
 
 /**
+ * 轻量底部提示（复制名称等非阻断反馈）：2 秒自动消失，不抢焦点。
+ */
+function showMiniToast(message, ms = 2000) {
+  try {
+    const text = String(message ?? '');
+    let el = document.querySelector('.mini-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'mini-toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    // 强制 reflow 让连续调用也能重播淡入
+    void el.offsetWidth;
+    el.classList.add('show');
+    clearTimeout(el.__toastTimer);
+    el.__toastTimer = setTimeout(() => el.classList.remove('show'), Math.max(800, Number(ms) || 2000));
+  } catch { /* DOM 不可用（测试 sandbox）时忽略 */ }
+}
+
+/**
+ * 复制文本到剪贴板：优先 Clipboard API，失败回退 textarea + execCommand。
+ * 返回 Promise<boolean>。
+ */
+async function copyToClipboard(text) {
+  const value = String(text ?? '');
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch { /* 回退 */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return !!ok;
+  } catch { return false; }
+}
+
+/**
  * 应用内确认弹窗（红色配色）：替代原生 confirm（Windows 系统对话框，观感割裂 +
  * electron#41602 焦点 bug）。**异步**：返回 Promise<boolean>。
  * 调用方写法：`if (!(await uiConfirm('确定删除…？'))) return;`（所在函数需 async）。
@@ -234,31 +280,44 @@ const CHAT_MSG_PAGE = 80;    // 存档页：首次渲染行数（500 行 innerHT
 const CHAT_MSG_MORE = 200;    // 存档页：每次滚动追加
 
 // ── 峰谷时段预设 ──────────────────────────────────────────────────────────
-// 内置作息模板（一键填充时段+档位）+ 一份用户自定义（custom）。
-// sliderPos 口径：0~100（10=仅艾特，100=全响应），与峰谷设置页输入框一致。
+// 内置作息模板（一键填充星期 + 时段 + 高峰触发条件/概率）+ 一份用户自定义（custom）。
+// 2026-10-21：触发条件从档位滑条改为「三开关 + 回复概率」，预设也改成新结构。
 const PEAK_PRESETS = {
-  workbuddy: { label: 'workbuddy（早8~晚11 高峰）',
-    peak: { start: '08:00', end: '23:00', sliderPos: 10 }, valley: { sliderPos: 100 } },
-  deepseek: { label: 'deepseek（早9~晚6 高峰）',
-    peak: { start: '09:00', end: '18:00', sliderPos: 10 }, valley: { sliderPos: 100 } }
+  workbuddy: {
+    label: 'workbuddy（工作日 8~23 高峰）',
+    weekdays: [1, 2, 3, 4, 5],
+    peak: { start: '08:00', end: '23:00', trigger: { mention: true, keyword: false, all: false }, probability: 100 }
+  },
+  deepseek: {
+    label: 'deepseek（每天 9~18 高峰）',
+    weekdays: [],
+    peak: { start: '09:00', end: '18:00', trigger: { mention: true, keyword: false, all: false }, probability: 100 }
+  }
 };
+
+function triggerDescUI(t) {
+  if (!t || t.all) return '任何消息';
+  return t.keyword ? '@+关键词' : '仅@';
+}
 
 /** 预设下拉的选项列表：内置 2 个 + 自定义（有才显示）。 */
 function peakPresetOptions(ps) {
   const out = Object.entries(PEAK_PRESETS).map(([k, v]) => [k, v.label]);
   const cu = ps?.custom;
   if (cu?.peak?.start) {
-    out.push(['custom', `自定义（峰 ${cu.peak.start}~${cu.peak.end} @${cu.peak.sliderPos} / 其余时间 @${cu.valley?.sliderPos ?? 100}）`]);
+    const days = Array.isArray(cu.weekdays) && cu.weekdays.length
+      ? `周${cu.weekdays.map((d) => '一二三四五六日'[d - 1]).join('')}`
+      : '每天';
+    out.push(['custom', `自定义（${days} ${cu.peak.start}~${cu.peak.end} · ${triggerDescUI(cu.peak.trigger)} · ${cu.peak.probability ?? 100}%）`]);
   }
   return out;
 }
 
-/** 把预设套进当前表单（改 DOM 值，用户仍可继续微调后保存）。 */
+/** 把预设套进峰谷模态框（改 DOM 值，用户仍可继续微调后保存）。 */
 function applyPeakPreset(key) {
   const p = PEAK_PRESETS[key] || state.config?.store?.peakSchedule?.custom;
   if (!p?.peak) return;
-  // ⚠️ 设值后必须派发 input 事件：程序改 .value 不会触发监听，
-  // 不派发的话时段字段的联动全停留在旧状态。
+  // ⚠️ 设值后必须派发 input 事件：程序改 .value 不会触发监听。
   const setVal = (sel, v) => {
     const el = $(sel);
     if (!el) return;
@@ -267,14 +326,90 @@ function applyPeakPreset(key) {
   };
   setVal('#cfg-peak-start', p.peak.start);
   setVal('#cfg-peak-end', p.peak.end);
-  // 档位点走自定义竖向滑条控制器（activeVSlider 在活跃设置弹窗打开时挂上）。
-  // 高峰珠（档位低）与低谷珠（档位高）各就各位；applyValues 会触发一次
-  // onChange 把值写进弹窗草稿 —— 刻度/区间带/说明文字随之刷新。
-  const hi = Math.min(Number(p.peak.sliderPos) || 0, Number(p.valley?.sliderPos ?? 100) || 100);
-  const lo = Math.max(Number(p.peak.sliderPos) || 0, Number(p.valley?.sliderPos ?? 100) || 100);
-  activeVSlider?.applyValues(lo, hi);
+  const days = Array.isArray(p.weekdays) && p.weekdays.length ? p.weekdays : [1, 2, 3, 4, 5, 6, 7];
+  for (let d = 1; d <= 7; d++) {
+    const box = $(`#peak-weekday-${d}`);
+    if (box) box.checked = days.includes(d);
+  }
+  const trig = normalizeTriggerUI(p.peak.trigger);
+  setChecked('#peak-trigger-mention', trig.mention);
+  setChecked('#peak-trigger-keyword', trig.keyword);
+  setChecked('#peak-trigger-all', trig.all);
+  const prob = Math.max(0, Math.min(100, Number(p.peak.probability ?? 100)));
+  setVal('#peak-prob-range', prob);
+  const val = $('#peak-prob-val');
+  if (val) val.textContent = `${prob}%`;
   const hint = $('#peak-preset-hint');
   if (hint) hint.textContent = key === 'custom' ? '已套用「自定义」。可继续微调，保存后生效。' : `已套用「${PEAK_PRESETS[key].label}」。可继续微调，保存后生效。`;
+}
+
+function setChecked(sel, on) {
+  const el = $(sel);
+  if (el) el.checked = !!on;
+}
+
+// ── 触发条件 + 概率的 UI 侧换算（与 src/trigger.js 同口径）──────────────
+function normalizeTriggerUI(t) {
+  const x = t || {};
+  if (x.all === true) return { mention: false, keyword: false, all: true };
+  if (x.mention !== true && x.keyword !== true) return { mention: true, keyword: false, all: false };
+  return { mention: true, keyword: x.keyword === true, all: false };
+}
+
+function tierTriggerUI(tier) {
+  const t = Number(tier);
+  if (!Number.isFinite(t) || t >= 4) return { mention: false, keyword: false, all: true };
+  if (t <= 1) return { mention: true, keyword: false, all: false };
+  return { mention: true, keyword: true, all: false };
+}
+
+/** 从 store（新字段优先，否则旧档位）得到 UI 用的 {trigger,probability,legacy}。 */
+function triggerFromStoreUI(store) {
+  const st = store || {};
+  if (st.trigger && typeof st.trigger === 'object') {
+    return {
+      trigger: normalizeTriggerUI(st.trigger),
+      probability: Math.max(0, Math.min(100, Number(st.replyProbability ?? 100))),
+      legacy: false
+    };
+  }
+  const pos = st.contextSliderPos !== undefined && st.contextSliderPos !== null
+    ? st.contextSliderPos
+    : tierToSlider(st.contextTier ?? 4, st.randomPercent ?? 0);
+  const { tier, randomPercent } = sliderToTierUI(pos);
+  return {
+    trigger: tierTriggerUI(tier),
+    probability: tier === 3 ? randomPercent : 100,
+    legacy: true
+  };
+}
+
+/** 峰谷高峰侧的触发配置（旧配置从 peak.sliderPos 推导）。 */
+function peakTriggerFromStoreUI(ps) {
+  const p = ps || {};
+  if (p.peak?.trigger && typeof p.peak.trigger === 'object') {
+    return {
+      trigger: normalizeTriggerUI(p.peak.trigger),
+      probability: Math.max(0, Math.min(100, Number(p.peak.probability ?? 100))),
+      legacy: false
+    };
+  }
+  const { tier, randomPercent } = sliderToTierUI(p.peak?.sliderPos);
+  return { trigger: tierTriggerUI(tier), probability: tier === 3 ? randomPercent : 100, legacy: true };
+}
+
+function triggerSummaryUI(trigger, probability) {
+  const t = normalizeTriggerUI(trigger);
+  const p = Math.max(0, Math.min(100, Number(probability ?? 100)));
+  return `${triggerDescUI(t)} · 概率 ${p}%`;
+}
+
+/** 新条件+概率 → 旧派生字段（与后端 legacyFromTrigger 同口径）。 */
+function legacyFromTriggerUI(trigger, probability) {
+  const t = normalizeTriggerUI(trigger);
+  const p = Math.max(0, Math.min(100, Math.round(Number(probability ?? 100))));
+  const tier = t.all ? 4 : (t.keyword ? 2 : 1);
+  return { contextTier: tier, randomPercent: p, contextSliderPos: tierToSlider(tier, p) };
 }
 
 /* ═══ 自定义竖向档位滑条（2026-09-19）═══

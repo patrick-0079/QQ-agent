@@ -391,39 +391,21 @@ const ctx = vm.createContext(sandbox);
     }
   }
 
-    // ── 档位反馈：滑到哪一档，大号读数 + 预设高亮同步 ──
-    console.log('\n=== 刻度段高亮（拖动联动）===');
-    /** 2026-09-24 concept2 改版：分段（tier-band）为静态热度渐变、不再动态高亮，
-        档位反馈 = 大号读数（tr-big）+ 预设（.preset.on）—— 断言改锚这两处，
-        行为意图不变（拖到哪一档，反馈必须正确且唯一）。 */
-    const tierRead = (html) => {
-      const m = /class="tr-big"[^>]*>([^<]+)</.exec(html);
-      return [...String(m ? m[1] : '').matchAll(/(\d)\s*档/g)].map((x) => Number(x[1]));
-    };
-    // 2026-09-24：活跃设置编辑器已从模态框改为内联挂载（mountActiveConfigEditor(root)），
-    // 取模板的方式随之改为「假 root + 捕获 innerHTML」—— 所有断言本身不变。
+    // ── 活跃设置改版（2026-10-21）：三开关 + 回复概率 ──
+    console.log('\n=== 活跃设置：触发条件 + 概率 ===');
+    const cfgSnapshot0 = JSON.stringify(cfg);
     let capturedBody = '';
     const fakeRoot = makeEl();
     Object.defineProperty(fakeRoot, 'innerHTML', {
       get: () => capturedBody,
       set: (v) => { capturedBody = String(v); }
     });
-    // ⚠️ state 是 vm 里的顶层 const —— 从外面（sandbox.state）**拿不到也改不了**
-    // （vm 顶层 const 是上下文词法绑定，不挂到 sandbox 对象上）。
-    // 旧版 renderAt 里那套 "prev = sandbox.state?.config?.store → 恢复" 全是死代码：
-    // sandbox.state 恒为 undefined，恢复永远不执行 —— 于是四象限测试在 store 上
-    // 留下的 unifiedTier:false 等"实验设置"会**漏进下一个象限**，测试互相污染。
-    // 正确做法：每次渲染前用干净的 cfg 快照整体重置 state.config（vm 注入），
-    // 再叠加本轮需要的开关 —— 彻底消除象限间的顺序依赖。
-    const cfgSnapshot = JSON.stringify(cfg);
-    const renderAt = (pos, storePatch = null) => {
+    const renderActive = (storePatch = null) => {
       capturedBody = '';
       try {
-        // 配置重置走 vm（state 是 vm 里的顶层 const，从外面摸不到）；
-        // 模态框函数从 ctx/sandbox 上取（vm 脚本里没有 ctx 这个名字，别写进去）。
         vm.runInContext(
-          'state.config = JSON.parse(' + JSON.stringify(cfgSnapshot) + ');'
-          + 'state.config.store = { ...(state.config.store || {}), contextSliderPos: ' + pos + ', ...( ' + JSON.stringify(storePatch || {}) + ' ) };',
+          'state.config = JSON.parse(' + JSON.stringify(cfgSnapshot0) + ');'
+          + 'state.config.store = { ...(state.config.store || {}), ...( ' + JSON.stringify(storePatch || {}) + ' ) };',
           ctx
         );
         (ctx.mountActiveConfigEditor || sandbox.mountActiveConfigEditor)?.(fakeRoot);
@@ -431,87 +413,55 @@ const ctx = vm.createContext(sandbox);
       return capturedBody;
     };
 
-    for (const [pos, want, desc] of [
-      [0, 1, '最左端'], [5, 1, '1档中段'], [10, 1, '1档右界'],
-      [15, 2, '2档'], [20, 2, '2档右界'],
-      [30, 3, '3档靠左'], [55, 3, '3档正中(50%)'], [75, 3, '3档靠右'], [90, 3, '3档右界'],
-      [95, 4, '4档'], [100, 4, '最右端']
+    const hasControls = (html) => ['ac-trigger-mention', 'ac-trigger-keyword', 'ac-trigger-all', 'ac-prob-range', 'ac-prob-val']
+      .every((id) => html.includes(`id="${id}"`));
+    for (const [label, patch, want] of [
+      ['仅@ 30%', { trigger: { mention: true, keyword: false, all: false }, replyProbability: 30 }, '仅@ · 概率 30%'],
+      ['@+关键词 100%', { trigger: { mention: true, keyword: true, all: false }, replyProbability: 100 }, '@+关键词 · 概率 100%'],
+      ['任何消息 5%', { trigger: { mention: false, keyword: false, all: true }, replyProbability: 5 }, '任何消息 · 概率 5%']
     ]) {
       try {
-        const html = renderAt(pos);
-        const on = tierRead(html);
-        const ok = on.length === 1 && on[0] === want;
+        const html = renderActive(patch);
+        const ok = hasControls(html) && html.includes(want);
         ok ? pass++ : fail++;
-        console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + String(pos).padStart(3) + '% (' + desc + ') → 高亮第 ' + want + ' 段'
-          + (ok ? '' : '  实际 [' + on.join(',') + ']'));
-      } catch (e) { fail++; console.log('  FAIL ' + pos + '% 抛错: ' + (e && e.message)); }
+        console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + label + ' 渲染正确' + (ok ? '' : `（含控件=${hasControls(html)} 文案=${html.includes(want)}）`));
+      } catch (e) { fail++; console.log('  FAIL ' + label + ' 抛错: ' + (e && e.message)); }
     }
 
-    // 任何时候只亮一段
-    for (const pos of [0, 10, 15, 20, 55, 90, 95, 100]) {
-      const html = renderAt(pos);
-      const on = tierRead(html);
-      const ok = on.length === 1;
+    // 旧配置（无 trigger 字段）按档位推导，保持惰性迁移
+    try {
+      const html = renderActive({ contextSliderPos: 55, trigger: undefined, replyProbability: undefined });
+      const ok = hasControls(html) && html.includes('@+关键词 · 概率 50%');
       ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + String(pos).padStart(3) + '% 只亮 1 段' + (ok ? '' : '  实际 ' + on.length + ' 段'));
-    }
+      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '旧档位 55 推导为「@+关键词 · 概率 50%」');
+    } catch (e) { fail++; console.log('  FAIL 旧档位推导抛错: ' + (e && e.message)); }
 
-    // 四段都有机会被点亮
-    const lit = new Set();
-    for (let p = 0; p <= 100; p += 0.5) for (const n of tierRead(renderAt(p))) lit.add(n);
-    {
-      const ok = lit.size === 4;
+    // 峰谷：高峰侧的新字段优先显示（摘要渲染在折叠卡头，由 renderChatSection 负责）
+    try {
+      const patch = {
+        trigger: { mention: true, keyword: false, all: false },
+        replyProbability: 100,
+        peakSchedule: {
+          enabled: true,
+          weekdays: [1, 2, 3, 4, 5],
+          peak: { start: '09:00', end: '18:00', trigger: { mention: false, keyword: false, all: true }, probability: 20 }
+        }
+      };
+      const merged = { ...cfg, store: { ...cfg.store, ...patch } };
+      const html = (ctx.renderChatSection || sandbox.renderChatSection)(merged);
+      const ok = html.includes('峰 任何消息 · 概率 20%') && html.includes('其余 仅@ · 概率 100%');
       ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '四段都能被点亮' + (ok ? '' : '  实际 [' + [...lit].sort().join(',') + ']'));
-    }
+      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '峰谷摘要同时显示高峰/其余设置');
+    } catch (e) { fail++; console.log('  FAIL 峰谷摘要抛错: ' + (e && e.message)); }
 
-    // 参数块（各档条数）已摊平进同一份 HTML —— 这里只验证档位读数点亮正确。
-    for (const [pos, want] of [[5, 1], [15, 2], [55, 3], [95, 4]]) {
-      const html = renderAt(pos);
-      const on = tierRead(html);
-      const ok = on.length === 1 && on[0] === want;
-      ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + pos + '% 刻度第' + on.join(',') + '段'
-        + (ok ? '' : '  （期望 ' + want + '）'));
-    }
-
-    // 2026-09-19 二次改版：滑条改为 createVSlider 生成的自定义控件
-    // （#ac-slider 容器，珠子在运行时由控制器注入 —— body 模板里看不到珠子，
-    //  初始形态靠容器上的 data-dual 声明）。
-    // 每个象限用 renderAt(pos, patch) 独立注入开关 —— cfg 快照重置保证互不污染。
-    // 2026-10-21 会话个性化改版：编辑器只负责"当前作用域"的一套档位，
-    // 分群/统一开关已删除。断言：
-    //   ① 单珠形态 + 模板里不再有分群/统一开关
-    //   ② 峰谷开启 → 双珠形态（峰珠在场）
-    //   ③ 作用域提示跟随 state.settingsScope（默认设置 / 某个群）
-    {
-      const html = renderAt(55);
-      const single = /id="ac-slider"[^>]*data-dual="0"/.test(html);
-      const noLegacy = !/id="ac-group-area"|id="ac-unifiedtier"|id="ac-group-buttons"/.test(html);
-      const ok = single && noLegacy;
-      ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '单珠形态，且不再渲染分群/统一开关'
-        + (ok ? '' : `  slider=${single} noLegacy=${noLegacy}`));
-    }
-    {
-      const html = renderAt(55, {
-        peakSchedule: { enabled: true, peak: { start: '09:00', end: '18:00', sliderPos: 10 }, valley: { sliderPos: 100 } }
-      });
-      const dual = /id="ac-slider"[^>]*data-dual="1"/.test(html);
-      const hasPeakKnob = /knob-peak/.test(html) && !/knob-peak"[^>]*display:none/.test(html);
-      const ok = dual && hasPeakKnob;
-      ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '峰谷开启 → 双珠形态'
-        + (ok ? '' : `  dual=${dual} peakKnob=${hasPeakKnob}`));
-    }
     {
       // 默认设置作用域（settingsView=session + scope=default）
       vm.runInContext("state.settingsView = 'session'; state.settingsScope = 'default'; state.chatSessions = [];", ctx);
-      const globalHtml = renderAt(55);
-      const globalOk = /当前编辑：全局默认档位/.test(globalHtml);
+      const globalHtml = renderActive();
+      const globalOk = /当前编辑：全局默认/.test(globalHtml);
       // 会话作用域：提示文案带上该群
       vm.runInContext("state.settingsScope = 'group:123456'; state.chatSessions = [{ key: 'group:123456', kind: 'group', id: '123456', name: '测试群' }];", ctx);
-      const scopedHtml = renderAt(55);
+      const scopedHtml = renderActive();
       const scopedOk = /当前编辑：/.test(scopedHtml) && /(123456|测试群)/.test(scopedHtml);
       vm.runInContext("state.settingsScope = 'default'; state.chatSessions = [];", ctx);
       const ok = globalOk && scopedOk;

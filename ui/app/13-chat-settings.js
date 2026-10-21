@@ -324,11 +324,13 @@ function renderSessionPanelHead() {
     : `${row?.kind === 'group' ? '群' : '私聊'}「${esc(row?.alias || row?.name || chatTitleOf(state.settingsScope))}」`;
   const sub = isDefault
     ? '以下设置是所有未单独自定义会话的默认值'
-    : `${esc(state.settingsScope)} · ${count ? `已自定义 ${count} 个分区` : '跟随默认设置'}`;
+    : `${esc(state.settingsScope)} · ${count ? `已自定义 ${count} 个分区` : '未改动项继承默认'}`;
   return `
     <div id="session-panel-head" class="session-panel-head">
       <div class="session-panel-title-row">
         <span class="session-panel-title">${title}</span>
+        ${!isDefault ? `<button class="btn btn-small btn-danger" id="session-reset-all-btn"
+          title="清除该会话的所有自定义（人设/记忆/聊天/工具技能），全部回到默认配置">一键还原默认配置</button>` : ''}
       </div>
       <div class="muted session-panel-sub">${sub}</div>
     </div>`;
@@ -376,6 +378,26 @@ function mountSessionRestoreButton() {
   if (!settingsTabActive() || state.settingsView !== 'session' || state.settingsScope === 'default') return;
   const wrap = $('#session-restore-btn-wrap');
   if (!wrap) return;
+  // 一键还原默认配置（清空该会话全部覆盖，不只是当前分区）
+  const resetAll = $('#session-reset-all-btn');
+  if (resetAll && !resetAll.__bound) {
+    resetAll.__bound = true;
+    resetAll.addEventListener('click', async () => {
+      const count = Object.keys(state.scopeOverrides || {}).length;
+      if (!count) { showMiniToast('当前已全部跟随默认配置'); return; }
+      if (!(await uiConfirm('确定把该会话的所有设置还原为默认配置？\n\n人设 / 记忆 / 聊天 / 工具与技能的全部自定义都会被清除。'))) return;
+      try {
+        // 先等挂起的自动保存落地，避免「还原后又被旧 patch 写回来」。
+        try { flushSettingsSaves(); } catch { /* ignore */ }
+        try { await window.__settingsWritePromise; } catch { /* ignore */ }
+        await api(`/api/chat-profiles/${profileUrl(state.settingsScope)}/overrides`, {
+          method: 'DELETE'
+        });
+        await refreshScopeAfterWrite();
+        showMiniToast('已还原为默认配置');
+      } catch (e) { showAppAlert(`还原失败：${e.message}`); }
+    });
+  }
   const section = sessionSectionNow();
   const label = PROFILE_SECTIONS.find(([id]) => id === section)?.[1] || section;
   if (isSectionOverridden()) {
@@ -394,7 +416,7 @@ function mountSessionRestoreButton() {
       } catch (e) { showAppAlert(`恢复失败：${e.message}`); }
     });
   } else {
-    wrap.innerHTML = `<span class="muted" style="font-size:12px">跟随默认设置</span>`;
+    wrap.innerHTML = `<span class="muted" style="font-size:12px">未改动项继承默认</span>`;
   }
 }
 

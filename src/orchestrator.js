@@ -14,6 +14,7 @@ import { vendorOfConfig } from './model-prices.js';
 import { randInt } from './util.js';
 import { buildSystemPrompt, buildUserPrompt, resolveContextTier } from './prompt.js';
 import { chatCompletion, chatCompletionWithRetry, addUsage, isRetryableError } from './llm.js';
+import { assistantEntryFromResponse } from './llm-messages.js';
 import { buildToolDefs, toOpenAiTools, executeTool } from './tools.js';
 import { modelImageVerdict } from './vision-scan.js';
 import { currentProviders } from './providers.js';
@@ -46,6 +47,9 @@ export class Orchestrator {
     this.pendingWake = new Set();      // 防抖中等待聚批的 chatKey
     this.pendingSessions = new Map();  // chatKey -> waiting sessionId（防抖期可见的“等待中”会话）
     this.verifiedWakes = new Set();    // 本轮 wake 由 onIncoming 触发判定排定的 chatKey（区别于 drain 等机械重排）
+    // chatKey -> 本轮触发判定用的骰子值（0~100）：新触发模型下概率只该掷一次，
+    // onIncoming 判定命中后固定下来，wake 复用同一结果，避免二次抽签把 @ 吞掉。
+    this.triggerRolls = new Map();
     this.consolidating = new Set();    // 正在整理记忆的 chatKey
     this.runningChats = new Set();     // 正在运行的 chatKey
     this.activeRuns = new Map();       // chatKey -> sessionId
@@ -183,6 +187,7 @@ export class Orchestrator {
     // 活跃期内的群：必响应，视作触发（与旧版"跳过判定"语义一致）
     const active = this.#activeState(chatKey);
     if (!active) {
+      const triggerRoll = Math.random() * 100;
       const tierResult = resolveContextTier({
         triggerEntries: entry ? [entry] : (this.store.peekUnread(chatKey, 1) || []),
         selfNickname: cfg.persona?.selfNickname || this.onebot.selfNickname || '',
@@ -190,9 +195,8 @@ export class Orchestrator {
         selfId: cfg.onebot?.selfId || this.onebot.selfId || '',
         cfg: storeConfigForChat(chatKey),
         isPrivate: String(chatKey).startsWith('private:'),
-        // 单条判定当场掷骰、当场出结果 —— 没有"预判/实跑"两阶段了，
-        // 骰子结果由 resolveContextTier 的 reason 带回（含当时的值）。
-        roll: null
+        // 单条判定当场掷骰、当场出结果；命中后固定本次 roll 给 wake 复用。
+        roll: triggerRoll
       });
       if (!tierResult.shouldRespond) {
         // 不触发：这条消息立即标已读（只标这一条，不动窗口外已积压的未读——
@@ -205,6 +209,7 @@ export class Orchestrator {
         this.emit('chat-update', chatKey);
         return;
       }
+      this.triggerRolls.set(chatKey, triggerRoll);
     }
 
     // 触发：进入固定的"等待中"倒计时（不重置）。verified 标记让 wake 知道
@@ -460,7 +465,7 @@ export class Orchestrator {
             selfId: cfgForJudge.onebot?.selfId || this.onebot.selfId || '',
             cfg: storeConfigForChat(chatKey),
             isPrivate: String(chatKey).startsWith('private:'),
-            roll: null
+            roll: this.triggerRolls.get(chatKey) ?? null
           });
           if (r.shouldRespond) { batchFloorTs = m.ts; hasTrigger = true; break; }   // 最早的触发消息定边界
         }
@@ -532,8 +537,10 @@ export class Orchestrator {
         selfId: cfgNow.onebot?.selfId || this.onebot.selfId || '',
         cfg: storeConfigForChat(chatKey),
         isPrivate: String(chatKey).startsWith('private:'),   // 私聊恒响应
-        roll: null
+        roll: this.triggerRolls.get(chatKey) ?? null
       });
+    // 本批触发判定的骰子已消费；避免长期驻留。
+    this.triggerRolls.delete(chatKey);
     // 活跃期覆盖：必响应，读取条数与其余档位一致（统一 historyCount），
     // reason 标注活跃来源，会话页可解释"为什么 1 档设置却响应了"。
     const activeState = this.#activeState(chatKey);
@@ -1033,12 +1040,12 @@ export class Orchestrator {
       const msg = response.message;
       const finalContent = typeof msg.content === 'string' ? msg.content : (msg.content ?? null);
       const finalToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : undefined;
-      const assistantEntry = {
-        role: 'assistant',
-        content: finalContent,
-        tool_calls: finalToolCalls,
-        raw: response.raw ?? null
-      };
+      // reasoning_content 必须留在消息序列里：DeepSeek 思考模式下，工具续轮要求
+      // 把上一轮 assistant 的思考原样回传，否则网关 400（2026-10-21 修）。
+      const assistantEntry = assistantEntryFromResponse(
+        { content: finalContent, tool_calls: finalToolCalls, reasoning_content: msg.reasoning_content },
+        { reasoning: response.reasoning, raw: response.raw ?? null }
+      );
       messages.push(assistantEntry);
       session.messages.push(structuredClone(assistantEntry));
       session.rounds = round + 1;

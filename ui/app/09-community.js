@@ -229,234 +229,269 @@ function createTierBar({ mount, dual = false, low = 100, high = 10, onChange = n
  * 用法：renderChatSection 渲染 `<div id="ac-editor"></div>`，
  *      bindSettingsEvents 每次重渲染后调 mountActiveConfigEditor(root) 挂载。
  */
+/**
+ * 活跃设置编辑器（2026-10-21 改版）：
+ *   触发条件三开关（仅@ / @+关键词 / 任何消息）+ 回复概率滑条。
+ *   峰谷：时段（星期+时间）+ 高峰专用的触发条件/概率。
+ *
+ * 保存仍走 saveAll → postConfigPatch（自动保存到当前作用域：默认/该会话）。
+ * 所有控件都标记 data-no-autosave：它们自己立即保存，不能触发表单的整段自动保存
+ * 与“撤销本次设置”按钮（那会在切换时把页面顶下去）。
+ */
 function mountActiveConfigEditor(root) {
-  const clampNum = (v, fb) => { const n = Number(v); return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : fb; };
+  const rootEl = root;
   const c = state.config || {};
   const st = c.store || {};
-  const B = TIER_SLIDER_BANDS;
   const ps = st.peakSchedule || {};
   const peakOn0 = ps.enabled === true;
-  const pos0 = sliderToTierUI_tierToSlider(st);
-  const tier0 = sliderToTierUI(peakOn0 ? clampNum(ps.valley?.sliderPos, pos0) : pos0).tier;
-  const peakTier0 = peakOn0 ? sliderToTierUI(clampNum(ps.peak?.sliderPos, 10)).tier : -1;
+  const base = triggerFromStoreUI(st);
   const scopeText = (!isSessionScope() && state.settingsScope === 'default')
-    ? '全局默认档位（未单独自定义的会话都用它）'
-    : `${chatTitleOf(state.settingsScope)} 的专属档位`;
+    ? '全局默认（未单独自定义的会话都用它）'
+    : `${chatTitleOf(state.settingsScope)} 的专属设置`;
 
-  root.innerHTML = `
-      <div class="ac-tier-wrap">
-        <div class="tier-scale" id="ac-slider" data-dual="${peakOn0 ? '1' : '0'}">
-          <div class="tier-band" style="left:0;width:${B.tier1End}%">1</div>
-          <div class="tier-band d2" style="left:${B.tier1End}%;width:${B.tier2End - B.tier1End}%">2</div>
-          <div class="tier-band d3" style="left:${B.tier2End}%;width:${B.tier3End - B.tier2End}%">3 · 随机概率线性</div>
-          <div class="tier-band d4" style="left:${B.tier3End}%;width:${100 - B.tier3End}%">4</div>
-          <div class="tier-sep" style="left:${B.tier1End}%"></div>
-          <div class="tier-sep" style="left:${B.tier2End}%"></div>
-          <div class="tier-sep" style="left:${B.tier3End}%"></div>
-          <div class="tier-knob knob-valley" style="left:${peakOn0 ? clampNum(ps.valley?.sliderPos, pos0) : pos0}%"></div>
-          <div class="tier-knob knob-peak" style="left:${clampNum(ps.peak?.sliderPos, 10)}%;${peakOn0 ? '' : 'display:none'}"></div>
-        </div>
-        <div class="tier-read">
-          <span class="tr-big" id="ac-tier-num">${peakOn0 && peakTier0 >= 1 && peakTier0 !== tier0 ? `峰 ${peakTier0} 档 · 谷 ${tier0} 档` : `${tier0} 档`}</span>
-          <span class="tr-txt" id="ac-tier-note">${peakOn0
-            ? `高峰：${descOf(clampNum(ps.peak?.sliderPos, 10))}<br>低谷：${descOf(clampNum(ps.valley?.sliderPos, pos0))}`
-            : descOf(pos0)}</span>
-        </div>
-        <div class="hint ac-target" id="ac-target">当前编辑：${esc(scopeText)} · 拖动即自动保存</div>
-      </div>`;
-  const overlay = root;
+  const q = (sel) => rootEl.querySelector(sel);
+  const qHead = (sel) => (rootEl.closest ? rootEl.closest('.setcard')?.querySelector(sel) : null) || q(sel);
+  const headCard = rootEl.closest ? rootEl.closest('.setcard') : null;
+  const ctrl = (sel) => headCard?.querySelector(sel) || q(sel);
 
-  // 「峰谷时段 / 档位参数」按钮在折叠卡头部（setCard 的 extra 插槽）。
-  const headCard = overlay.closest ? overlay.closest('.setcard') : null;
-  const ctrl = (sel) => headCard?.querySelector(sel) || overlay.querySelector(sel);
+  const triggerControls = (prefix, trig, prob) => `
+    <div class="ac-trigger-row" data-prefix="${prefix}">
+      <label class="ac-trigger-item"><input type="checkbox" class="ac-trigger" data-trigger="mention"
+        id="${prefix}-trigger-mention" data-no-autosave ${trig.mention ? 'checked' : ''} /> 只有@时触发</label>
+      <label class="ac-trigger-item"><input type="checkbox" class="ac-trigger" data-trigger="keyword"
+        id="${prefix}-trigger-keyword" data-no-autosave ${trig.keyword ? 'checked' : ''} /> @+关键词触发</label>
+      <label class="ac-trigger-item"><input type="checkbox" class="ac-trigger" data-trigger="all"
+        id="${prefix}-trigger-all" data-no-autosave ${trig.all ? 'checked' : ''} /> 任何消息都触发</label>
+    </div>
+    <div class="ac-prob-row">
+      <span class="ac-prob-label">触发后回复概率</span>
+      <input type="range" id="${prefix}-prob-range" class="ac-prob-range" min="0" max="100" step="5"
+             value="${prob}" data-no-autosave />
+      <span class="ac-prob-val" ${prefix === 'peak' ? 'id="peak-prob-val"' : `id="${prefix}-prob-val"`}>${prob}%</span>
+    </div>`;
+
+  rootEl.innerHTML = `
+    <div class="ac-trigger-wrap">
+      <div class="hint ac-target" id="ac-target">当前编辑：${esc(scopeText)} · 改动即时保存</div>
+      <div class="ac-sub-title">触发条件</div>
+      ${triggerControls('ac', base.trigger, base.probability)}
+      <div class="hint">「任何消息都触发」开启时，上面两项会置灰；回复概率在**触发之后**生效。</div>
+      <div class="ac-summary" id="ac-summary">${esc(triggerSummaryUI(base.trigger, base.probability))}</div>
+    </div>`;
+
+  const readTrigger = (prefix) => normalizeTriggerUI({
+    mention: rootEl.querySelector(`#${prefix}-trigger-mention`)?.checked,
+    keyword: rootEl.querySelector(`#${prefix}-trigger-keyword`)?.checked,
+    all: rootEl.querySelector(`#${prefix}-trigger-all`)?.checked
+  });
+  const readProb = (prefix) => Math.max(0, Math.min(100, Number(rootEl.querySelector(`#${prefix}-prob-range`)?.value ?? 100)));
+
+  function syncTriggerUI(prefix) {
+    const all = rootEl.querySelector(`#${prefix}-trigger-all`)?.checked === true;
+    for (const name of ['mention', 'keyword']) {
+      const el = rootEl.querySelector(`#${prefix}-trigger-${name}`);
+      if (el) el.disabled = all;
+    }
+  }
+  function normalizeChecks(prefix) {
+    const mention = rootEl.querySelector(`#${prefix}-trigger-mention`);
+    const keyword = rootEl.querySelector(`#${prefix}-trigger-keyword`);
+    const all = rootEl.querySelector(`#${prefix}-trigger-all`);
+    if (!all?.checked) {
+      if (keyword?.checked && mention) mention.checked = true;
+      if (!mention?.checked && !keyword?.checked && mention) mention.checked = true;
+    }
+    syncTriggerUI(prefix);
+  }
+  function syncProbLabel(prefix) {
+    const val = rootEl.querySelector(`#${prefix}-prob-val`);
+    if (val) val.textContent = `${readProb(prefix)}%`;
+  }
+  const baseTriggerNow = () => readTrigger('ac');
+  const baseProbNow = () => readProb('ac');
+
+  function saveAll(extra = {}) {
+    const storePatch = { ...(extra.storeOverride || {}) };
+    if (!Object.keys(storePatch).length) return;
+    const p = postConfigPatch({ store: storePatch });
+    // 供「一键还原默认配置」等待：避免还原请求先落地、旧的自动保存后到又把覆盖写回来。
+    window.__settingsWritePromise = p;
+    p.then(() => { mountSessionRestoreButton(); renderSettings(); })
+      .catch((e) => showAppAlert(`保存失败：${e.message}`));
+  }
+
+  function saveBase() {
+    const trig = baseTriggerNow();
+    const prob = baseProbNow();
+    const derived = legacyFromTriggerUI(trig, prob);
+    const psNow = state.config?.store?.peakSchedule || {};
+    const patch = { trigger: trig, replyProbability: prob, ...derived };
+    if (psNow.enabled === true) {
+      patch.peakSchedule = { ...psNow, valley: { sliderPos: derived.contextSliderPos } };
+    }
+    saveAll({ storeOverride: patch });
+  }
+
+  for (const prefix of ['ac']) {
+    const box = rootEl;
+    box.querySelectorAll(`#${prefix}-trigger-mention, #${prefix}-trigger-keyword, #${prefix}-trigger-all`).forEach((el) => {
+      el.addEventListener('change', () => {
+        normalizeChecks(prefix);
+        const sum = box.querySelector('#ac-summary');
+        if (sum) sum.textContent = triggerSummaryUI(readTrigger('ac'), readProb('ac'));
+        saveBase();
+      });
+    });
+    const range = box.querySelector(`#${prefix}-prob-range`);
+    range?.addEventListener('input', () => syncProbLabel(prefix));
+    range?.addEventListener('change', () => {
+      normalizeChecks(prefix);
+      const sum = box.querySelector('#ac-summary');
+      if (sum) sum.textContent = triggerSummaryUI(readTrigger('ac'), readProb('ac'));
+      saveBase();
+    });
+  }
+  syncTriggerUI('ac');
+
+  // ── 峰谷开关 ──
   const chkPeak = ctrl('#ac-peak-enabled');
   const peakOnNow = () => (chkPeak ? chkPeak.checked === true : (state.config?.store?.peakSchedule?.enabled === true));
-  const noteEl = overlay.querySelector('#ac-tier-note');
 
-  const vsl = createTierBar({
-    mount: overlay.querySelector('#ac-slider'),
-    dual: peakOn0,
-    low: peakOn0 ? clampNum(ps.valley?.sliderPos, pos0) : pos0,
-    high: clampNum(ps.peak?.sliderPos, 10),
-    onInput: ({ low, high }) => {
-      const peakOn = peakOnNow();
-      if (peakOn) {
-        syncScale(sliderToTierUI(low).tier, sliderToTierUI(high).tier);
-        setNote(`高峰：${descOf(high)}<br>低谷：${descOf(low)}`);
-      } else {
-        syncScale(sliderToTierUI(low).tier, -1);
-        setNote(descOf(low));
-      }
-    },
-    onChange: ({ low, high }) => stageFromBar(low, high)
-  });
-  activeVSlider = vsl;
-  // MutationObserver 在极简环境（无 DOM 的测试 sandbox）里可能不存在
-  const mo = typeof MutationObserver === 'function' ? new MutationObserver(() => {
-    if (!overlay.isConnected) {
-      if (activeVSlider === vsl) activeVSlider = null;
-      vsl?.destroy();
-      mo.disconnect();
-    }
-  }) : null;
-  mo?.observe(document.body, { childList: true });
-
-  function syncScale(tier, peakTier) {
-    const numEl = overlay.querySelector('#ac-tier-num');
-    if (numEl) {
-      numEl.textContent = (peakTier >= 1 && peakTier !== tier) ? `峰 ${peakTier} 档 · 谷 ${tier} 档` : `${tier} 档`;
-    }
-    const valEl = overlay.closest('.setcard')?.querySelector('.sc-val');
-    if (valEl && vsl) {
-      const v = vsl.values;
-      valEl.textContent = (peakTier >= 1 && peakTier !== tier)
-        ? `峰 ${tierSummary(v.high)} / 谷 ${tierSummary(v.low)}`
-        : tierSummary(v.low);
-    }
-  }
-  function setNote(html) { if (noteEl) noteEl.innerHTML = html; }
-
-  /** 把滑条当前值写进当前作用域（自动保存）。 */
-  function stageFromBar(low, high) {
-    const now = state.config?.store?.peakSchedule || {};
-    const storePatch = {};
-    if (peakOnNow()) {
-      storePatch.contextSliderPos = clampNum(low, pos0);
-      storePatch.peakSchedule = {
-        ...now,
-        enabled: true,
-        peak: { start: String(now.peak?.start || '09:00'), end: String(now.peak?.end || '18:00'), sliderPos: clampNum(high, 10) },
-        valley: { sliderPos: clampNum(low, 100) }
-      };
-    } else {
-      storePatch.contextSliderPos = clampNum(low, pos0);
-      storePatch.peakSchedule = { ...now, enabled: false };
-    }
-    saveAll({ storeOverride: storePatch });
-  }
-
-  /** 峰谷开关：切换 enabled 并立即刷新滑条形态。 */
   function applyPeakSwitch(on) {
-    const now = state.config?.store?.peakSchedule || {};
-    const base = sliderToTierUI_tierToSlider(state.config?.store || {});
+    const psNow = state.config?.store?.peakSchedule || {};
+    const peakCfg = peakTriggerFromStoreUI(psNow);
+    const baseNow = triggerFromStoreUI(state.config?.store || {});
     const patch = {
-      store: {
-        peakSchedule: {
-          ...now,
-          enabled: !!on,
-          peak: { start: String(now.peak?.start || '09:00'), end: String(now.peak?.end || '18:00'), sliderPos: clampNum(now.peak?.sliderPos, 10) },
-          valley: { sliderPos: clampNum(now.valley?.sliderPos, base) }
-        }
-      }
+      ...psNow,
+      enabled: !!on,
+      weekdays: Array.isArray(psNow.weekdays) ? psNow.weekdays : [],
+      peak: {
+        start: String(psNow.peak?.start || '09:00'),
+        end: String(psNow.peak?.end || '18:00'),
+        trigger: peakCfg.trigger,
+        probability: peakCfg.probability
+      },
+      valley: { sliderPos: legacyFromTriggerUI(baseNow.trigger, baseNow.probability).contextSliderPos }
     };
-    if (on) patch.store.contextSliderPos = clampNum(now.valley?.sliderPos, base);
-    saveAll({ storeOverride: patch.store });
-    const lo = clampNum(state.config?.store?.peakSchedule?.valley?.sliderPos, base);
-    const hi = clampNum(state.config?.store?.peakSchedule?.peak?.sliderPos, 10);
-    vsl.setDual(!!on);
-    if (on) {
-      vsl.setValues(lo, hi);
-      syncScale(sliderToTierUI(lo).tier, sliderToTierUI(hi).tier);
-      setNote(`高峰：${descOf(hi)}<br>低谷：${descOf(lo)}`);
-    } else {
-      vsl.setValues(base, base);
-      syncScale(sliderToTierUI(base).tier, -1);
-      setNote(descOf(base));
-    }
+    saveAll({ storeOverride: { peakSchedule: patch } });
   }
   chkPeak?.addEventListener('change', () => applyPeakSwitch(chkPeak.checked === true));
 
-  /** 统一保存：slider / 峰谷时段 / 档位参数模态框共用的落点（自动保存）。 */
-  function saveAll(extra = {}) {
-    const psNow = state.config?.store?.peakSchedule || {};
-    const peakEnabled = extra.peakEnabled ?? (psNow.enabled === true);
-    const storePatch = extra.storeOverride ? { ...extra.storeOverride } : {};
-    if (!extra.storeOverride) {
-      if (peakEnabled) {
-        storePatch.contextSliderPos = clampNum(psNow.valley?.sliderPos, 100);
-        storePatch.peakSchedule = {
-          ...psNow,
-          enabled: true,
-          peak: { start: extra.peakStart || psNow.peak?.start || '09:00', end: extra.peakEnd || psNow.peak?.end || '18:00', sliderPos: clampNum(psNow.peak?.sliderPos, 10) },
-          valley: { sliderPos: clampNum(psNow.valley?.sliderPos, 100) }
-        };
-      } else {
-        storePatch.contextSliderPos = sliderToTierUI_tierToSlider(state.config?.store || {});
-        storePatch.peakSchedule = { ...psNow, enabled: false };
-      }
-      if (extra.tierParams) Object.assign(storePatch, extra.tierParams);
-    } else if (extra.tierParams) {
-      storePatch.tierParams = undefined;
-      delete storePatch.tierParams;
-      Object.assign(storePatch, extra.tierParams);
-    }
-    const patch = { store: storePatch };
-    if (extra.chatActive) patch.chatActive = { ...(state.config?.chatActive || {}), ...extra.chatActive };
-    postConfigPatch(patch).then(() => {
-      mountSessionRestoreButton();
-      renderSettings();
-    }).catch((e) => showAppAlert(`保存失败：${e.message}`));
-  }
-
-  // ── 峰谷时段模态框 ──
+  // ── 峰谷时段模态框：星期 + 时间 + 高峰触发条件/概率 ──
   function openPeakModal() {
     const psNow = state.config?.store?.peakSchedule || {};
     const start = String(psNow.peak?.start || '09:00');
     const end = String(psNow.peak?.end || '18:00');
+    const peakCfg = peakTriggerFromStoreUI(psNow);
+    const days = Array.isArray(psNow.weekdays) && psNow.weekdays.length
+      ? psNow.weekdays
+      : [1, 2, 3, 4, 5, 6, 7];
+    const weekRow = [1, 2, 3, 4, 5, 6, 7].map((d) => `
+      <label class="peak-day"><input type="checkbox" id="peak-weekday-${d}" ${days.includes(d) ? 'checked' : ''} /> 周${'一二三四五六日'[d - 1]}</label>`).join('');
     const sub = modelModalShell({
       head: '峰谷时段',
       body: `
+        <div class="field">
+          <label>生效星期（都不勾 = 每天）</label>
+          <div class="peak-days">${weekRow}</div>
+        </div>
         <div class="field-row">
-            <div class="field"><label>高峰时段（开始 ~ 结束）</label>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="time" id="cfg-peak-start" value="${esc(start)}" />
-                <span class="muted">~</span>
-                <input type="time" id="cfg-peak-end" value="${esc(end)}" />
-              </div>
-              <div class="hint">时段支持跨零点；高峰之外的时间一律视为低谷。启用 / 停用用「峰谷时段」按钮上的开关。</div></div>
-            <div class="field"><label>预设方案</label>
-              <select id="cfg-peak-preset">
-                <option value="">— 选择预设 —</option>
-                <div class="hint" id="peak-preset-hint" style="margin-top:4px">选预设自动填充时段与档位点；「保存当前方案为自定义」后随提交生效。</div>
-                ${peakPresetOptions(psNow).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}
-              </select></div>
-          </div>
-          <div class="field"><button class="btn btn-small" id="peak-preset-save-btn" type="button">保存当前方案为「自定义」</button></div>`,
+          <div class="field"><label>高峰开始</label><input type="time" id="cfg-peak-start" value="${esc(start)}" /></div>
+          <div class="field"><label>高峰结束</label><input type="time" id="cfg-peak-end" value="${esc(end)}" /></div>
+        </div>
+        <div class="hint">跨零点也支持；高峰之外的时间一律视为「其余时间」，用主面板的设置。启用 / 停用见卡头开关。</div>
+        <div class="field"><label>预设方案</label>
+          <select id="cfg-peak-preset">
+            <option value="">— 选择预设 —</option>
+            ${peakPresetOptions(psNow).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}
+          </select>
+          <div class="hint" id="peak-preset-hint" style="margin-top:4px">选预设自动填充星期、时段与高峰设置。</div>
+        </div>
+        <div class="ac-sub-title" style="margin-top:12px">高峰时段用</div>
+        ${triggerControls('peak', peakCfg.trigger, peakCfg.probability)}
+        <div class="field"><button class="btn btn-small" id="peak-preset-save-btn" type="button">保存当前方案为「自定义」</button></div>`,
       foot: `<button class="btn" id="ac-peak-cancel">取消</button>
              <button class="btn btn-primary" id="ac-peak-save">保存</button>`
     });
-    const peakPreset = sub.querySelector('#cfg-peak-preset');
-    if (peakPreset) peakPreset.addEventListener('change', () => {
+    const subRoot = sub;
+    const readPeakTrigger = () => normalizeTriggerUI({
+      mention: subRoot.querySelector('#peak-trigger-mention')?.checked,
+      keyword: subRoot.querySelector('#peak-trigger-keyword')?.checked,
+      all: subRoot.querySelector('#peak-trigger-all')?.checked
+    });
+    const readPeakProb = () => Math.max(0, Math.min(100, Number(subRoot.querySelector('#peak-prob-range')?.value ?? 100)));
+    const syncPeak = () => {
+      const all = subRoot.querySelector('#peak-trigger-all')?.checked === true;
+      for (const name of ['mention', 'keyword']) {
+        const el = subRoot.querySelector(`#peak-trigger-${name}`);
+        if (el) el.disabled = all;
+      }
+    };
+    const normalizePeak = () => {
+      const mention = subRoot.querySelector('#peak-trigger-mention');
+      const keyword = subRoot.querySelector('#peak-trigger-keyword');
+      const all = subRoot.querySelector('#peak-trigger-all');
+      if (!all?.checked) {
+        if (keyword?.checked && mention) mention.checked = true;
+        if (!mention?.checked && !keyword?.checked && mention) mention.checked = true;
+      }
+      syncPeak();
+    };
+    subRoot.querySelectorAll('#peak-trigger-mention, #peak-trigger-keyword, #peak-trigger-all').forEach((el) => {
+      el.addEventListener('change', normalizePeak);
+    });
+    subRoot.querySelector('#peak-prob-range')?.addEventListener('input', (e) => {
+      const val = subRoot.querySelector('#peak-prob-val');
+      if (val) val.textContent = `${e.target.value}%`;
+    });
+    syncPeak();
+
+    const peakPreset = subRoot.querySelector('#cfg-peak-preset');
+    peakPreset?.addEventListener('change', () => {
       if (peakPreset.value) applyPeakPreset(peakPreset.value);
       peakPreset.value = '';
     });
-    const peakSaveBtn = sub.querySelector('#peak-preset-save-btn');
-    if (peakSaveBtn) peakSaveBtn.addEventListener('click', () => {
-      const s = sub.querySelector('#cfg-peak-start')?.value || '09:00';
-      const e = sub.querySelector('#cfg-peak-end')?.value || '18:00';
-      const v = vsl?.values || { low: 100, high: 10 };
-      const psNext = state.config?.store?.peakSchedule || {};
-      saveAll({ storeOverride: { peakSchedule: { ...psNext, custom: { peak: { start: s, end: e, sliderPos: v.high }, valley: { sliderPos: v.low } } } } });
-      closeModelModal(sub);
+    const readDays = () => [1, 2, 3, 4, 5, 6, 7].filter((d) => subRoot.querySelector(`#peak-weekday-${d}`)?.checked);
+    const buildPeak = () => ({
+      start: subRoot.querySelector('#cfg-peak-start')?.value || '09:00',
+      end: subRoot.querySelector('#cfg-peak-end')?.value || '18:00',
+      trigger: readPeakTrigger(),
+      probability: readPeakProb()
     });
-    sub.querySelector('#ac-peak-cancel')?.addEventListener('click', () => { closeModelModal(sub); renderSettings(); });
-    sub.querySelector('#ac-peak-save')?.addEventListener('click', () => {
+
+    subRoot.querySelector('#peak-preset-save-btn')?.addEventListener('click', () => {
+      const psNext = state.config?.store?.peakSchedule || {};
+      const peak = buildPeak();
+      const weekdays = readDays();
+      saveAll({ storeOverride: { peakSchedule: { ...psNext, custom: { peak, weekdays, valley: { sliderPos: legacyFromTriggerUI(triggerFromStoreUI(state.config?.store || {}).trigger, triggerFromStoreUI(state.config?.store || {}).probability).contextSliderPos } } } } });
+      closeModelModal(subRoot);
+    });
+    subRoot.querySelector('#ac-peak-cancel')?.addEventListener('click', () => { closeModelModal(subRoot); renderSettings(); });
+    subRoot.querySelector('#ac-peak-save')?.addEventListener('click', () => {
+      const psNext = state.config?.store?.peakSchedule || {};
+      const baseNow = triggerFromStoreUI(state.config?.store || {});
       saveAll({
-        peakStart: sub.querySelector('#cfg-peak-start')?.value || '09:00',
-        peakEnd: sub.querySelector('#cfg-peak-end')?.value || '18:00'
+        storeOverride: {
+          peakSchedule: {
+            ...psNext,
+            weekdays: readDays(),
+            peak: buildPeak(),
+            valley: { sliderPos: legacyFromTriggerUI(baseNow.trigger, baseNow.probability).contextSliderPos }
+          }
+        }
       });
-      closeModelModal(sub);
+      closeModelModal(subRoot);
     });
   }
 
-  // ── 档位参数模态框（历史条数 / 关键词表 / 被召唤后持续参与）──
+  // ── 档位参数（历史条数 / 关键词 / 连续参与）──
   function openTierParamsModal() {
     const stNow = state.config?.store || {};
     const cNow = state.config || {};
     const sub = modelModalShell({
       head: '档位参数',
       body: `
-        <h4 class="tp-h">响应时随【已读信息】带多少条历史（各档位相同）</h4>
+        <h4 class="tp-h">响应时随【已读信息】带多少条历史</h4>
         <div class="tp-row">发送
           <input class="inp mono tp-count" type="number" id="tp-historycount" min="1" max="500" value="${esc(stNow.historyCount ?? stNow.allCount ?? 80)}" />
           条已读历史。</div>
@@ -466,11 +501,11 @@ function mountActiveConfigEditor(root) {
         <div class="tp-row">最多额外追加
           <input class="inp mono tp-count" type="number" id="tp-anchor-extra" min="1" max="50" value="${esc(Number(stNow.promptAnchor?.maxExtraRead ?? 5))}" />
           条已读，超出则整体重置窗口。</div>
-        <div class="field"><label>② 的关键词表（每行一个，不区分大小写）</label>
+        <div class="field"><label>关键词触发用的词表（每行一个，不区分大小写）</label>
           <textarea id="tp-keywords" rows="4" placeholder="小鲸鱼&#10;bot">${esc((stNow.keywords || []).join('\n'))}</textarea></div>
         <h4 class="tp-h" style="margin-top:12px">被召唤后持续参与</h4>
         <div class="checkbox-row"><input type="checkbox" id="tp-chatactive" ${cNow.chatActive?.enabled === true ? 'checked' : ''} />
-          <label for="tp-chatactive">被召唤后可持续参与话题（1/2/3 档触发时生效）</label></div>
+          <label for="tp-chatactive">被召唤后可持续参与话题（仅@/关键词触发时生效）</label></div>
         <div class="field"><label>活跃期最长持续（分钟，到期自动潜水）</label>
           <input type="number" id="tp-chatactive-ttl" min="1" max="240" value="${esc(Number(cNow.chatActive?.ttlMinutes ?? 30))}" style="max-width:160px" /></div>`,
       foot: `<button class="btn" id="tp-cancel">取消</button>
@@ -514,6 +549,7 @@ function mountActiveConfigEditor(root) {
   });
   ctrl('#ac-tier-params-btn')?.addEventListener('click', openTierParamsModal);
 }
+
 
 /**
  * 「创建技能 / 创建插件」引导模态框（技能页与插件页标题旁的 ＋ 按钮）。

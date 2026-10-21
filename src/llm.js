@@ -7,6 +7,7 @@ import {
   resolveThinkingRequest, buildThinkingParams, stripThinkingParams,
   looksLikeThinkingRejection, extractReasoning, extractReasoningTokens, THINKING_BODY_KEYS
 } from './thinking.js';
+import { toApiMessages, stripReasoning, shouldSendReasoning } from './llm-messages.js';
 
 function joinUrl(base, path) {
   return `${String(base).replace(/\/+$/, '')}${path}`;
@@ -297,10 +298,19 @@ export async function chatCompletion({ messages, tools = null, toolChoice = 'aut
   }
   const ctx = skillContext || { api, model: api.model, messages };
 
+  // 本次请求是否回传 reasoning_content（DeepSeek 思考续轮必需）。
+  // 只对 deepseek 方言、且用户没有明确关闭思考时发送。
+  let includeReasoning = false;
+  try {
+    const req0 = resolveThinkingRequest(api, ctx);
+    includeReasoning = shouldSendReasoning({ dialect: req0.dialect, effort: req0.effort });
+  } catch { /* 方言识别失败：不回传，保持旧行为 */ }
+
   const buildBaseBody = () => {
     const body = {
       model: api.model,
-      messages,
+      // 只发协议字段：丢弃会话内部的 raw 等；思考续轮补 reasoning_content。
+      messages: toApiMessages(messages, { includeReasoning }),
       stream: false
     };
     if (tools && tools.length > 0) {
@@ -410,9 +420,22 @@ export async function chatCompletion({ messages, tools = null, toolChoice = 'aut
   // **重试动作仍然在这里执行**，所以超时预算、abort、日志、计费口径都不变。
   let degradeNote = null;
   if (!res.ok && (res.status === 400 || res.status === 422)) {
-    const retry = await withoutRejectedParams(body, res.text, ctx, res.status);
+    let retry = await withoutRejectedParams(body, res.text, ctx, res.status);
+    // 兜底：思考续轮缺少 reasoning_content（DeepSeek 专有报错）。
+    // 正常路径已在消息里回传；这里覆盖“历史消息来自旧版本/插件改写了消息”的情况：
+    // 摘掉所有思考参数再重试一次，让对话能继续（质量降级但不 400）。
+    if (!retry && /reasoning_content[^]{0,80}must be passed back|thinking mode must be passed back/i.test(res.text)) {
+      retry = {
+        body: { ...stripThinkingParams(body), messages: stripReasoning(body.messages) },
+        reason: '思考续轮缺少 reasoning_content，已关闭思考参数重试'
+      };
+    }
     if (retry) {
       degradeNote = retry.reason || '网关拒绝扩展参数，已去掉后重试';
+      // 思考参数被摘掉后，消息里的 reasoning_content 也应一起摘掉（严格网关会拒绝）。
+      if (retry.body?.messages && !THINKING_BODY_KEYS.some((k) => k in retry.body)) {
+        retry.body.messages = stripReasoning(retry.body.messages);
+      }
       // 思考参数被摘掉后，"与 temperature 互斥"的前提就不成立了，
       // 把用户原本设置的温度还回去，让降级路径等价于"该 Skill 从未生效"。
       if (removedTemperature !== undefined && retry.body.temperature === undefined) {

@@ -55,6 +55,17 @@ function renderSettings() {
   // 滚动位置保持：innerHTML 重建会把阅读位置弹回顶部（也是一次大滚动跳转，
   // 会加剧深滚动下的合成错位）。重建后原样恢复。
   const prevScrollTop = box ? box.scrollTop : 0;
+  // 折叠卡开合状态保持：重建后所有 setCard 会按默认 open 重置，用户点开的卡
+  // 突然收起/重开会造成页面高度跳变（“开关技能时页面跳一下”的成因之一）。
+  const foldStates = new Map();
+  if (box) {
+    box.querySelectorAll('.setcard.fold[id]').forEach((card) => {
+      foldStates.set(card.id, card.classList.contains('open'));
+    });
+  }
+  // 左栏会话列表的滚动位置同样要保住（renderSettingsSidebar 会重建整个 rail）。
+  const railScrollEl = document.querySelector('#cm-rail .session-menu');
+  const prevRailScroll = railScrollEl ? railScrollEl.scrollTop : 0;
   const focusSnap = (() => {
     const el = document.activeElement;
     if (!box || !el || el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT') return null;
@@ -78,7 +89,14 @@ function renderSettings() {
     // 会话面板：分区标签切换 + 分区菜单行尾的"恢复默认/跟随默认"标记
     if (typeof bindSessionTabs === 'function') bindSessionTabs(box);
     if (typeof mountSessionRestoreButton === 'function') mountSessionRestoreButton();
+    // 恢复折叠状态（只恢复本次渲染仍存在的卡 id）
+    for (const [id, open] of foldStates) {
+      const card = box.querySelector(`.setcard.fold[id="${id}"]`);
+      if (card) card.classList.toggle('open', open);
+    }
     if (box && prevScrollTop) box.scrollTop = prevScrollTop;
+    const railNow = document.querySelector('#cm-rail .session-menu');
+    if (railNow && prevRailScroll) railNow.scrollTop = prevRailScroll;
   } catch (err) {
     // 单个设置区渲染失败不能让整页空白 —— 显示错误占位，其余页签仍可用
     console.error('[settings] 渲染失败:', err);
@@ -530,6 +548,13 @@ const TIER_HINT = {
 function renderChatSection(c) {
   const st = c.store || {};
   const fold = (typeof setCard === 'function') ? setCard : (o) => `<div class="setcard">${o.body}</div>`;
+  // 活跃设置：触发条件 + 回复概率（2026-10-21 改版），峰谷作为附加维度。
+  const actBase = triggerFromStoreUI(st);
+  const actPeakOn = st.peakSchedule?.enabled === true;
+  const actPeak = actPeakOn ? peakTriggerFromStoreUI(st.peakSchedule) : null;
+  const actSummary = actPeakOn
+    ? `峰 ${triggerSummaryUI(actPeak.trigger, actPeak.probability)} / 其余 ${triggerSummaryUI(actBase.trigger, actBase.probability)}`
+    : triggerSummaryUI(actBase.trigger, actBase.probability);
 return `
     <h3>聊天设置</h3>
     ${fold({
@@ -587,18 +612,14 @@ return `
       id: 'card-active-config',
       icon: '⚡',
       title: '活跃设置',
-      sub: '响应档位 / 峰谷',
-      val: tierSummary(sliderToTierUI_tierToSlider(st)),
-      // 卡头插槽：竖分割线 + 两件套（峰谷时段 / 档位参数），
-      // 紧贴标题块左侧排布，与右上角档位摘要之间留白。
-      // 2026-10-21：「统一设置」开关已删除 —— 配置本来就按会话（profile）隔离，
-      // 再放一个"所有群共用/各自设置"的全局开关只会和会话覆盖打架。
+      sub: '触发条件 / 回复概率 / 峰谷',
+      val: actSummary,
       extra: `<span class="ac-head-controls"><span class="ac-head-div"></span>
-        <div class="btn ac-peak-btn" id="ac-peak-btn" role="button" tabindex="0" title="点击设置高峰时段（开始 / 结束与预设方案）">
+        <div class="btn ac-peak-btn" id="ac-peak-btn" role="button" tabindex="0" title="点击设置高峰时段（星期 / 开始结束 / 高峰触发条件）">
           <span>🌅 峰谷时段</span>
-          <label class="switch ac-peak-switch" title="启用 / 停用峰谷切换（高峰时段用高峰档，其余时间用低谷档）"><input type="checkbox" id="ac-peak-enabled" ${st.peakSchedule?.enabled === true ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span></label>
+          <label class="switch ac-peak-switch" title="启用 / 停用峰谷切换（高峰用高峰设置，其余时间用主面板设置）"><input type="checkbox" id="ac-peak-enabled" ${st.peakSchedule?.enabled === true ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span></label>
         </div>
-        <button class="btn" id="ac-tier-params-btn" title="档位参数：各档条数 / 关键词表 / 被召唤后持续参与">⚙ 档位参数</button>
+        <button class="btn" id="ac-tier-params-btn" title="档位参数：历史条数 / 关键词表 / 被召唤后持续参与">⚙ 档位参数</button>
       </span>`,
       open: true,
       body: `<div id="ac-editor"></div>`
@@ -1153,7 +1174,7 @@ function renderModulePage(kind) {
     const haystack = [s.id, s.name, s.description, s.dir, catLabel[s.category] || s.category]
       .filter(Boolean).join(' ').toLowerCase();
     return `
-    <div class="mcard ${stateCls}" data-skill-id="${esc(s.id)}" data-search="${esc(haystack)}" title="${esc(stateTitle)}">
+    <div class="mcard ${stateCls}" data-skill-id="${esc(s.id)}" data-copy-name="${esc(s.name || s.id)}" data-search="${esc(haystack)}" title="${esc(`${stateTitle} · 点击复制名称`)}">
       <div class="mcard-main">
         <div class="mcard-name">${esc(s.name)} <span class="skill-card__ver">v${esc(s.version)}</span>${configIssue ? '<span class="mcard-badge-config">需配置</span>' : ''}</div>
         ${(s.toolIds || []).length ? `<div class="mcard-tools" title="本技能注册的工具 id">${(s.toolIds || []).map((id) => `<code class="mcard-tool-id">${esc(id)}</code>`).join('')}</div>` : ''}
@@ -1230,6 +1251,19 @@ function bindModulePageEvents(kind) {
   // 用全局 $$ 会把另一页的卡片也绑一遍 —— 同一个开关被绑两次，一次切换会发两个请求。
   const scope = $(meta.boxSel);
   if (!scope) return;
+  // 点击卡片复制名称（2026-10-21）：不拦截卡片上的按钮/文本选择。
+  scope.querySelectorAll('.mcard').forEach((card) => {
+    card.addEventListener('click', async (e) => {
+      if (e.target?.closest?.('button')) return;
+      const sel = typeof window.getSelection === 'function' ? String(window.getSelection() || '') : '';
+      if (sel.trim()) return;
+      const name = card.dataset.copyName || '';
+      if (!name) return;
+      const ok = await copyToClipboard(name);
+      if (ok) showMiniToast(`已复制：${name}`);
+      else showAppAlert('复制失败，请手动选中名称复制');
+    });
+  });
   scope.querySelectorAll('.skill-settings-btn, .mcard-gear').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();   // 齿轮在卡片内部，点它不能触发整卡开关
@@ -1403,7 +1437,7 @@ function renderToolsSection(c) {
             <span class="muted skill-scope-state">${on ? '已启用' : '已关闭'}</span>
           </div>
           <label class="switch tool-switch" title="${loaded ? `只对${scopeLabel}生效` : '该扩展未成功加载，无法启用'}">
-            <input type="checkbox" class="skill-scope-toggle" data-skill-id="${esc(s.id)}"
+            <input type="checkbox" class="skill-scope-toggle" data-skill-id="${esc(s.id)}" data-no-autosave
                    ${on ? 'checked' : ''} ${loaded ? '' : 'disabled'} />
             <span class="track"><span class="thumb"></span></span>
           </label>

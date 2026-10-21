@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process';
 import { getConfig, getGlobalConfig, updateConfig, deepMerge as deepMergeConfig, DATA_DIR } from './config.js';
 import {
   listChatSessions, upsertProfile, getProfile, removeProfile,
-  patchProfileOverrides, clearProfileSection,
+  patchProfileOverrides, clearProfileSection, setProfileOverrides,
   effectiveConfigForChat, withChatScope, isChatAdmitted,
   isSkillWantedAnywhere, isValidChatKey, makeChatKey, isChatDenied,
   profiledChatKeys, purgeSkillFromProfiles,
@@ -1358,6 +1358,23 @@ export function createRoutes(deps) {
           return json(res, 200, {
             ok: true, profile: r.profile, overrides: r.overrides,
             ignored: disallowed,
+            effective: sanitizeConfig(effectiveConfigForChat(key))
+          });
+        } catch (error) {
+          return json(res, 400, { ok: false, error: String(error?.message ?? error) });
+        }
+      }
+    },
+    {
+      // 一键还原默认配置：清空该会话的全部覆盖（保留会话本身/别名/置顶）。
+      method: 'DELETE', pattern: /^\/api\/chat-profiles\/(group|private):([A-Za-z0-9_-]+)\/overrides$/,
+      handler: async ({ res, json, match }) => {
+        const key = `${match[1]}:${match[2]}`;
+        try {
+          const r = setProfileOverrides(key, {});
+          emit('status', { chatProfilesChanged: true, key });
+          return json(res, 200, {
+            ok: true, profile: r.profile, overrides: r.overrides,
             effective: sanitizeConfig(effectiveConfigForChat(key))
           });
         } catch (error) {

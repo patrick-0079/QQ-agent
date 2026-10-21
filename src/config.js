@@ -4,6 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PERSONAS } from './personas.js';
 import { sliderToTier } from './tier-slider.js';   // 零依赖模块，避免循环依赖
+import {
+  effectiveTrigger, legacyFromTrigger, isPeakWindow,
+  resolvePeakSliderPos as triggerPeakSliderPos
+} from './trigger.js';
 import { scopedConfig } from './config-scope.js';  // 会话配置作用域（ALS，见该文件头注释）
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -262,6 +266,9 @@ export const DEFAULT_CONFIG = {
     // 2026-09-25 改版：档位不再决定读取条数 —— 各档统一读 historyCount 条，
     // 档位退化为纯粹的"触发方式开关"（被艾特/关键词/随机/全部）。
     contextTier: 4,             // 1=仅艾特 2=+关键词 3=+随机 4=全响应
+    // 2026-10-21 活跃设置改版：新字段优先；未写入时按上面旧档位推导（惰性迁移）。
+    // replyProbability 只在新字段模式下生效（旧档位 1/2/4 恒 100）。
+    replyProbability: 100,
     historyCount: 80,           // 各档统一：响应时随【已读信息】带多少条历史
     keywords: [],               // 2 档的关键词表
     randomPercent: 10,          // 3 档：y% 概率
@@ -282,6 +289,8 @@ export const DEFAULT_CONFIG = {
     // 命中某时段时用该时段的档位覆盖全局滑条；都不命中用全局滑条。
     peakSchedule: {
       enabled: false,           // 总开关
+      // 生效星期：1=周一 … 7=周日；空数组 = 每天（旧配置没有该字段时按每天处理）。
+      weekdays: [],
       // 高峰时段：start~end（"HH:MM"，跨零点也支持，如 22:00~06:00）
       peak: { start: '09:00', end: '18:00', sliderPos: 10 },   // 高峰档位（默认 1 档仅艾特）
       // 低谷档位（默认 4 档全响应）。**只认 sliderPos**：时段语义是
@@ -700,14 +709,29 @@ export function updateConfig(patch) {
   stripObsoleteFields(currentConfig);
   configVersion += 1;
 
-  // ── 响应档位：以滑条位置为唯一真相，派生 tier 与随机概率 ──
-  // 前端只负责上报滑条位置（contextSliderPos），档位和概率一律由这里换算。
-  // 这样即使前端算错、或者有人直接调接口只传位置，配置也不会自相矛盾。
-  const posRaw = currentConfig?.store?.contextSliderPos;
-  if (posRaw !== undefined && posRaw !== null) {
-    const { tier, randomPercent } = sliderToTier(posRaw);
-    currentConfig.store.contextTier = tier;
-    currentConfig.store.randomPercent = randomPercent;
+  // ── 响应触发：新字段优先，旧滑条兜底（2026-10-21 改版）──
+  // 新 UI 写 store.trigger/replyProbability；这里派生旧字段，保证仍读
+  // contextTier/randomPercent/contextSliderPos 的代码与插件行为一致。
+  const triggerNow = currentConfig?.store?.trigger;
+  if (triggerNow && typeof triggerNow === 'object') {
+    const derived = legacyFromTrigger(triggerNow, currentConfig.store.replyProbability);
+    Object.assign(currentConfig.store, derived);
+    // 峰谷高峰侧同理：写 trigger 后镜像旧 sliderPos
+    const peak = currentConfig.store.peakSchedule?.peak;
+    if (peak && typeof peak === 'object' && peak.trigger && typeof peak.trigger === 'object') {
+      peak.sliderPos = legacyFromTrigger(peak.trigger, peak.probability).contextSliderPos;
+    }
+    if (currentConfig.store.peakSchedule?.valley) {
+      currentConfig.store.peakSchedule.valley.sliderPos = derived.contextSliderPos;
+    }
+  } else {
+    // 旧路径：以滑条位置为唯一真相
+    const posRaw = currentConfig?.store?.contextSliderPos;
+    if (posRaw !== undefined && posRaw !== null) {
+      const { tier, randomPercent } = sliderToTier(posRaw);
+      currentConfig.store.contextTier = tier;
+      currentConfig.store.randomPercent = randomPercent;
+    }
   }
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -743,33 +767,36 @@ export function personaForChat(chatKey) {
  */
 export function storeConfigForChat(chatKey) {
   const store = (scopedConfig() ? getConfig() : getGlobalConfig()).store || {};
-  // ── 指令禁言：该群被禁言且未到期 → 强制 1 档（仅艾特）──
+  // ── 指令禁言：该群被禁言且未到期 → 强制“仅 @ + 100%” ──
   const mutedTier = commandMuteTier(chatKey);
   if (mutedTier !== null) {
-    return { ...store, contextTier: 1, randomPercent: 0 };
+    return {
+      ...store,
+      trigger: { mention: true, keyword: false, all: false },
+      replyProbability: 100,
+      contextTier: 1,
+      randomPercent: 100,
+      contextSliderPos: 5
+    };
   }
-  const peakOn = store.peakSchedule?.enabled === true;
-  const inPeakNow = peakOn && peakWindowActive(store.peakSchedule);
-  let pos = clampSliderPos(store.contextSliderPos);
-  if (peakOn) {
-    pos = inPeakNow
-      ? clampSliderPos(store.peakSchedule.peak?.sliderPos)
-      : clampSliderPos(store.peakSchedule.valley?.sliderPos);
+  // 触发条件与概率：只有配置里显式写过新字段时才返回 trigger（新路径）；
+  // 旧配置只返回派生档位，让 resolveContextTier 继续走旧逻辑（惰性迁移）。
+  const eff = effectiveTrigger(store);
+  const derived = legacyFromTrigger(eff.trigger, eff.probability);
+  const out = { ...store, ...derived };
+  if (!eff.legacy) {
+    out.trigger = eff.trigger;
+    out.replyProbability = eff.probability;
   }
-  const { tier, randomPercent } = sliderToTier(pos);
-  return { ...store, contextSliderPos: pos, contextTier: tier, randomPercent };
+  return out;
 }
 
 /**
- * 当前时间是否落在高峰时段内（峰谷判定的第一步，供 storeConfigForChat 复用）。
+ * 当前时间是否落在高峰时段内（星期 + 时间；跨零点归属开始日）。
+ * 统一由 trigger.js 判定，避免两处口径漂移。
  */
-function peakWindowActive(ps, at = new Date()) {
-  const minutes = at.getHours() * 60 + at.getMinutes();
-  const s = parseHHMM(ps?.peak?.start);
-  const e = parseHHMM(ps?.peak?.end);
-  if (s === null || e === null || s === e) return false;
-  if (s < e) return minutes >= s && minutes < e;
-  return minutes >= s || minutes < e;
+export function peakWindowActive(ps, at = new Date()) {
+  return isPeakWindow(ps, at);
 }
 
 /**
@@ -789,29 +816,10 @@ export function commandMuteTier(chatKey, at = Date.now()) {
 }
 
 /**
- * 峰谷切换的核心判定：当前时间落在哪个时段。
- * 2026-09-18 四象限改版后的语义：高峰窗口内 = peak.sliderPos，
- * 窗口外一律 = valley.sliderPos（低谷时段不再单独编辑）。
- * 注意：storeConfigForChat 内联了同一判定（分群峰谷 groupPeakPos 也在那里处理）；
- * 修改时段判定口径时两处必须同步改。
+ * 峰谷切换的核心判定：当前时间落在哪个时段（供旧调用方读取滑条位置）。
+ * 新逻辑见 trigger.js：高峰窗口内可用 peak.trigger/probability，未保存新字段时
+ * 退回旧 peak.sliderPos；窗口外一律 valley.sliderPos。
  */
 export function resolvePeakSliderPos(store, at = new Date()) {
-  const ps = store?.peakSchedule;
-  if (!ps || ps.enabled !== true) return null;
-  if (peakWindowActive(ps, at)) return clampSliderPos(ps.peak?.sliderPos);
-  return clampSliderPos(ps.valley?.sliderPos);
-}
-
-function parseHHMM(raw) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(raw || '').trim());
-  if (!m) return null;
-  const h = Number(m[1]), min = Number(m[2]);
-  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
-  return h * 60 + min;
-}
-
-function clampSliderPos(pos) {
-  const n = Number(pos);
-  if (!Number.isFinite(n)) return 100;
-  return Math.min(100, Math.max(0, n));
+  return triggerPeakSliderPos(store, at);
 }

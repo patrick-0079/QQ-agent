@@ -14,6 +14,7 @@ import { getConfig, personaForChat } from './config.js';
 // 滑条换算放在独立模块（零依赖），避免 config.js ↔ prompt.js 循环依赖。
 // 这里 re-export 是为了让已经从 prompt.js 引用的代码不受影响。
 import { sliderToTier as _sliderToTier, tierToSlider as _tierToSlider, TIER_SLIDER_BANDS as _TIER_SLIDER_BANDS } from './tier-slider.js';
+import { normalizeTrigger, clampProb } from './trigger.js';
 export { _sliderToTier as sliderToTier, _tierToSlider as tierToSlider, _TIER_SLIDER_BANDS as TIER_SLIDER_BANDS };
 import { formatFullTime, formatShortTime } from './util.js';
 import { buildStickerContext, buildStickerStrategyHint } from './stickers.js';
@@ -475,12 +476,8 @@ export function resolveContextTier({ triggerEntries = [], selfNickname = '', bot
   // ≠ 群友 @ 了"摸鱼小能手"）；正文里的关键词照常命中。
   const keyword = hitKeyword((triggerEntries || []).map((e) => stripMentions(e)).join('\n'), c.keywords);
   // 掷骰子：调用方可传入已固定的 roll（0-100），避免重复随机。
-  // ⚠️ 同一批消息的预判（#predictTier）与实跑（wake 里的 tierResult）各掷一次
-  //    是刻意的 —— 防抖窗口里预判"会响应"创建了等待会话，窗口结束实跑重新掷
-  //    是"二次抽签"，但两次共用同一个 randomPercent 阈值；预判命中实跑未命中时
-  //    走"未触发"路径把消息标已读（不响应）。这是原设计，不是缺陷。
   const rollValue = roll === null || roll === undefined ? Math.random() * 100 : Number(roll);
-  const randomHit = rollValue < Math.max(0, Math.min(100, Number(c.randomPercent) || 0));
+  const clampedRoll = Number.isFinite(rollValue) ? rollValue : 0;
 
   // 拍一拍 = 轻量召唤：触发批里有"拍了拍我"的事件时按 1 档响应（与被艾特同级）。
   // 判定依据是 isPoke 标记 + 文本里"拍了拍 我"（后者兜底老存档里没有标记的记录）。
@@ -488,6 +485,24 @@ export function resolveContextTier({ triggerEntries = [], selfNickname = '', bot
   if (pokeMe) {
     return { tier: 1, count: historyCount(), reason: '拍了拍我', shouldRespond: true };
   }
+
+  // ── 新模型（2026-10-21）：触发条件 + 回复概率 ──────────────────────────
+  // 配置里有 store.trigger 时走这里；旧配置继续走下面的档位逻辑（惰性迁移）。
+  if (c.trigger && typeof c.trigger === 'object') {
+    const trigger = normalizeTrigger(c.trigger);
+    const probability = clampProb(c.replyProbability ?? 100);
+    const pass = probability >= 100 || clampedRoll < probability;
+    const gate = (tierHit, reason) => (pass
+      ? { tier: tierHit, count: historyCount(), reason: `${reason}（概率 ${probability}%）`, shouldRespond: true }
+      : { tier: 0, count: 0, reason: `${reason}，但概率未中（${clampedRoll.toFixed(0)} >= ${probability}%）`, shouldRespond: false });
+
+    if (trigger.all) return gate(4, '全部响应');
+    if (atMe) return gate(1, '被艾特');
+    if (trigger.keyword && keyword) return gate(2, '关键词命中');
+    return { tier: 0, count: 0, reason: '未触发', shouldRespond: false };
+  }
+
+  const randomHit = clampedRoll < Math.max(0, Math.min(100, Number(c.randomPercent) || 0));
 
   // 4 档：无条件响应（兜底）
   if (tier >= 4) {
@@ -504,7 +519,7 @@ export function resolveContextTier({ triggerEntries = [], selfNickname = '', bot
   if (tier >= 3 && randomHit) {
     // 概率判定用 rollValue（0~100 的骰子值）与 randomPercent 比较；两条路径
     // （预判/实跑）各掷一次，reason 里带上当时的骰子值便于排查"为什么没响应"。
-    return { tier: 3, count: historyCount(), reason: `随机命中(${rollValue.toFixed(0)}%)`, shouldRespond: true };
+    return { tier: 3, count: historyCount(), reason: `随机命中(${clampedRoll.toFixed(0)}%)`, shouldRespond: true };
   }
 
   // 都没命中：不响应（调用方会把这批标记已读）

@@ -443,6 +443,92 @@ await c.check('用量页「展开全部/收起」按钮真的能开合（曾经�
   return `折叠 ${a} → 展开 ${b} → 收起 ${d}`;
 });
 
+await c.check('切换技能/插件时页面不跳：折叠状态保持、无撤销按钮', async () => {
+  const doc = window.document;
+  window.switchTab('chatmanage');
+  await sleep(500);
+  window.selectCmScope('group:990001');
+  await sleep(900);
+  window.switchCmSub('settings');
+  await sleep(1200);
+  doc.querySelector('[data-session-section="tools"]')?.click();
+  await sleep(500);
+  const card = doc.querySelector('#card-scope-skills') || doc.querySelector('#cm-settings .setcard.fold');
+  if (!card) throw new Error('找不到技能分区折叠卡');
+  const head = card.querySelector('.fold-head');
+  if (card.classList.contains('open')) { head.click(); await sleep(200); }
+  const before = card.classList.contains('open');
+  const cb = doc.querySelector('.skill-scope-toggle');
+  if (!cb) throw new Error('找不到技能开关');
+  cb.click();
+  await sleep(1200);
+  if (card.classList.contains('open') !== before) throw new Error('开关后折叠状态被重置（页面会跳）');
+  if (doc.querySelector('.settings-undo-btn')) throw new Error('技能开关不应触发「撤销本次设置」按钮');
+});
+
+await c.check('活跃设置：任何消息开关会置灰另两个触发条件', async () => {
+  const doc = window.document;
+  doc.querySelector('[data-session-section="chat"]')?.click();
+  await sleep(700);
+  const all = doc.querySelector('#ac-trigger-all');
+  const mention = doc.querySelector('#ac-trigger-mention');
+  const keyword = doc.querySelector('#ac-trigger-keyword');
+  if (!all || !mention || !keyword) throw new Error('缺少触发条件三开关');
+  all.checked = true;
+  all.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await sleep(150);
+  if (!mention.disabled || !keyword.disabled) throw new Error('勾选「任何消息」后另两个开关应置灰');
+  all.checked = false;
+  all.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await sleep(900);
+});
+
+await c.check('峰谷模态框支持星期 + 高峰触发条件', async () => {
+  const doc = window.document;
+  const btn = doc.querySelector('#ac-peak-btn');
+  if (!btn) throw new Error('缺少峰谷时段入口');
+  btn.click();
+  await sleep(300);
+  const need = ['cfg-peak-start', 'cfg-peak-end', 'peak-weekday-1', 'peak-weekday-7', 'peak-trigger-mention', 'peak-trigger-all', 'peak-prob-range'];
+  for (const id of need) {
+    if (!doc.querySelector(`#${id}`)) throw new Error(`峰谷模态框缺少 #${id}`);
+  }
+  const cancel = doc.querySelector('#ac-peak-cancel');
+  if (cancel) cancel.click();
+  await sleep(200);
+});
+
+await c.check('一键还原默认配置：清空该会话全部覆盖', async () => {
+  const doc = window.document;
+  const btn = doc.querySelector('#session-reset-all-btn');
+  if (!btn) throw new Error('会话头缺少「一键还原默认配置」按钮');
+  btn.click();
+  await sleep(250);
+  // 走真实的确认弹窗（不依赖 window.uiConfirm 覆盖是否生效）
+  const ok = doc.querySelector('#ui-confirm-ok') || [...doc.querySelectorAll('button')].filter((b) => b.textContent.trim() === '确定').pop();
+  if (ok) { ok.click(); await sleep(900); }
+  const prof = await window.api('/api/chat-profiles/group:990001');
+  if (Object.keys(prof.overrides || {}).length) throw new Error(`还原后仍有覆盖：${JSON.stringify(prof.overrides)}`);
+});
+
+await c.check('仓库卡片点击可复制名称', async () => {
+  const doc = window.document;
+  window.switchTab('plugins');
+  await sleep(1300);
+  let copied = '';
+  Object.defineProperty(window.navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async (t) => { copied = String(t); } }
+  });
+  const card = doc.querySelector('#plugins-page .mcard');
+  if (!card) throw new Error('插件页没有卡片');
+  card.click();
+  await sleep(120);
+  const want = card.dataset.copyName || '';
+  if (!copied || copied !== want) throw new Error(`复制内容不对：${copied}，期望 ${want}`);
+  if (!doc.querySelector('.mini-toast.show')) throw new Error('复制后没有轻提示');
+});
+
 await ctx.teardown();
 try { window.close(); } catch { /* ignore */ }
 try { dom.window.close(); } catch { /* ignore */ }

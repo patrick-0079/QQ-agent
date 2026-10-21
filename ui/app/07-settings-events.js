@@ -45,9 +45,9 @@ function bindSettingsEvents(c) {
   let undoBtn = null;
 
   function markDirty(el) {
-    // 纯界面筛选框（技能/插件搜索）不是配置项：不能触发自动保存，
-    // 否则每敲一个字都会发一次整段保存、还可能被重渲染打断输入。
-    if (el?.closest?.('[data-no-autosave]')) return;
+    // 纯界面筛选框 / 技能插件开关不是配置项：不能触发自动保存与“撤销”按钮
+    // （技能插件开关自己直接调 API 保存；再走整段保存会插按钮、把页面顶下去）。
+    if (el?.closest?.('[data-no-autosave], .skill-scope-toggle, .skill-toggle')) return;
     const block = el?.closest?.('.field, .checkbox-row, .tier-param, .price-card, .tool-card, .settings-runstate, .prompt-preview-card, .persona-per-chat, .persona-chat-btn');
     if (block) dirtyEls.add(block);
     showUndoBtn();
@@ -77,7 +77,15 @@ function bindSettingsEvents(c) {
       }
     });
     const form = settingsFormRoot();
-    if (form) form.prepend(undoBtn);
+    if (form) {
+      const before = form.scrollTop;
+      form.prepend(undoBtn);
+      // 插入按钮会把下方内容整体下移；已滚动时补偿，避免“页面跳一下”。
+      if (before > 0) {
+        const h = undoBtn.offsetHeight + 8;
+        form.scrollTop = before + h;
+      }
+    }
   }
 
   function scheduleSave(delay = 600) {

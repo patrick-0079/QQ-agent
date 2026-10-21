@@ -1295,6 +1295,25 @@ c.section('13.7 会话级技能开关隔离');
       await hit('DELETE', '/api/chat-profiles/group:999004');
     }
   });
+
+  await c.check('DELETE /overrides：一键清空该会话全部覆盖（会话本身保留）', async () => {
+    await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '999005', alias: '一键还原测试群' } });
+    try {
+      await hit('PUT', '/api/chat-profiles/group:999005/overrides', {
+        body: { overrides: { persona: { roleText: '测试人设' }, store: { contextSliderPos: 55 } } }
+      });
+      const before = await hit('GET', '/api/chat-profiles/group:999005');
+      assert.ok(Object.keys(before.data.overrides || {}).length >= 2, '还原前应有覆盖');
+      const del = await hit('DELETE', '/api/chat-profiles/group:999005/overrides');
+      assert.equal(del.status, 200, `删除覆盖应 200，实际 ${del.status} ${del.text}`);
+      assert.deepEqual(del.data.overrides, {}, '覆盖必须被清空');
+      const after = await hit('GET', '/api/chat-profiles/group:999005');
+      assert.ok(after.data.profile, '会话本身（profile）不能被删掉');
+      assert.deepEqual(after.data.overrides || {}, {}, '读回也应没有覆盖');
+    } finally {
+      await hit('DELETE', '/api/chat-profiles/group:999005');
+    }
+  });
 }
 
 // ── 13.8 仓库只读化：重扫 / 新装默认关闭 / 删除级联 ──────────────────
@@ -1380,6 +1399,36 @@ c.section('13.8 扩展仓库：重扫 / 默认关闭 / 删除级联');
       assert.ok(clean.data.removedSessions >= 1, '应报告清理了多少个会话');
       const prof = await hit('GET', '/api/chat-profiles/group:999002');
       assert.ok(!prof.data.overrides?.skills?.[GHOST_ID], '会话里的残留开关必须被清掉');
+    });
+    await c.check('运行时新增目录：即使配置残留 enabled:true，也强制全局+所有会话关闭', async () => {
+      const STALE = 'covstale';
+      const staleDir = path.join(ROOT, 'skills', STALE);
+      // 模拟“以前装过/配置里残留了开启状态”，再放回目录
+      await hit('POST', '/api/config', { body: { skills: { [STALE]: { enabled: true } } } });
+      await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '999003' } });
+      await hit('PUT', '/api/chat-profiles/group:999003/overrides', {
+        body: { overrides: { skills: { [STALE]: { enabled: true } } } }
+      });
+      fs.mkdirSync(staleDir, { recursive: true });
+      fs.writeFileSync(path.join(staleDir, 'skill.json'), JSON.stringify({
+        id: STALE, name: '残留配置测试扩展', version: '1.0.0', category: 'utility', description: 'runtime default-off'
+      }), 'utf8');
+      fs.writeFileSync(path.join(staleDir, 'index.js'), 'export function setup() {}\n', 'utf8');
+      try {
+        const r = await hit('POST', '/api/skills/reload');
+        assert.equal(r.status, 200, `重扫应 200，实际 ${r.status}`);
+        const cfg = await hit('GET', '/api/config');
+        assert.equal(cfg.data.skills?.[STALE]?.enabled, false, '残留 enabled:true 必须被新装默认关闭覆盖');
+        const prof = await hit('GET', '/api/chat-profiles/group:999003');
+        assert.ok(!prof.data.overrides?.skills?.[STALE], '所有会话里的同名开关必须被清掉');
+        const scoped = await hit('GET', '/api/skills?chat=group%3A999003');
+        const row = (scoped.data.skills || []).find((s) => s.id === STALE);
+        assert.equal(row?.enabled, false, '该会话视角也必须关闭');
+      } finally {
+        try { await hit('DELETE', `/api/skills/${STALE}`); } catch { /* ignore */ }
+        try { fs.rmSync(staleDir, { recursive: true, force: true }); } catch { /* ignore */ }
+        try { await hit('DELETE', '/api/chat-profiles/group:999003'); } catch { /* ignore */ }
+      }
     });
   } finally {
     removeFixture();

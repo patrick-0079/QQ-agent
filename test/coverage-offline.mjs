@@ -143,6 +143,113 @@ c.section('2. tier-slider.js 响应档位换算');
   });
 }
 
+// ── 2.5 trigger.js：触发条件 + 概率（2026-10-21 改版）──────────────────
+c.section('2.5 trigger.js 触发条件 / 概率 / 峰谷星期');
+{
+  const T = await import('../src/trigger.js');
+  const { resolveContextTier } = await import('../src/prompt.js');
+
+  await c.check('normalizeTrigger：all 独占、keyword 蕴含 mention、全关回落 mention', () => {
+    assert.deepEqual(T.normalizeTrigger({ all: true, mention: true, keyword: true }), { mention: false, keyword: false, all: true });
+    assert.deepEqual(T.normalizeTrigger({ keyword: true }), { mention: true, keyword: true, all: false });
+    assert.deepEqual(T.normalizeTrigger({}), { mention: true, keyword: false, all: false });
+  });
+
+  await c.check('旧档位 → 条件/概率映射', () => {
+    assert.deepEqual(T.triggerFromTier(1), { mention: true, keyword: false, all: false });
+    assert.deepEqual(T.triggerFromTier(2), { mention: true, keyword: true, all: false });
+    assert.deepEqual(T.triggerFromTier(3), { mention: true, keyword: true, all: false });
+    assert.deepEqual(T.triggerFromTier(4), { mention: false, keyword: false, all: true });
+    assert.equal(T.probabilityFromTier(3, 42), 42);
+    assert.equal(T.probabilityFromTier(1, 0), 100);
+    const legacy = T.legacyFromTrigger({ mention: true, keyword: true, all: false }, 30);
+    assert.equal(legacy.contextTier, 2);
+    assert.equal(legacy.randomPercent, 30);
+  });
+
+  const cfgNew = (trigger, prob) => ({ trigger, replyProbability: prob, historyCount: 80, keywords: ['鲸鱼'] });
+  await c.check('新模型：@ 命中后按概率决定是否回复', () => {
+    const trigger = { mention: true, keyword: false, all: false };
+    const hit = resolveContextTier({ cfg: cfgNew(trigger, 50), triggerEntries: [{ text: '@bot 在吗', atMe: true }], roll: 10 });
+    assert.equal(hit.shouldRespond, true, '概率 50%、骰子 10 应回复');
+    assert.equal(hit.tier, 1, '被艾特应报 tier 1');
+    const miss = resolveContextTier({ cfg: cfgNew(trigger, 50), triggerEntries: [{ text: '@bot 在吗', atMe: true }], roll: 80 });
+    assert.equal(miss.shouldRespond, false, '概率 50%、骰子 80 不应回复');
+    assert.equal(miss.tier, 0);
+  });
+
+  await c.check('新模型：仅@ 不响应关键词；@+关键词响应关键词；任何消息全响应', () => {
+    const kw = [{ text: '鲸鱼今天好活跃', atMe: false }];
+    assert.equal(resolveContextTier({ cfg: cfgNew({ mention: true, keyword: false, all: false }, 100), triggerEntries: kw, roll: 1 }).shouldRespond, false);
+    assert.equal(resolveContextTier({ cfg: cfgNew({ mention: true, keyword: true, all: false }, 100), triggerEntries: kw, roll: 1 }).tier, 2);
+    assert.equal(resolveContextTier({ cfg: cfgNew({ mention: false, keyword: false, all: true }, 100), triggerEntries: kw, roll: 1 }).tier, 4);
+    assert.equal(resolveContextTier({ cfg: cfgNew({ mention: false, keyword: false, all: true }, 0), triggerEntries: kw, roll: 1 }).shouldRespond, false, '概率 0 不应回复');
+  });
+
+  await c.check('峰谷：星期 + 时间判定（含跨零点归属开始日）', () => {
+    const ps = { enabled: true, weekdays: [1, 2, 3, 4, 5], peak: { start: '09:00', end: '18:00' } };
+    assert.equal(T.isPeakWindow(ps, new Date(2026, 9, 19, 10, 0)), true, '周一 10:00 在高峰');
+    assert.equal(T.isPeakWindow(ps, new Date(2026, 9, 17, 10, 0)), false, '周六 10:00 不在高峰');
+    const overnight = { enabled: true, weekdays: [5], peak: { start: '22:00', end: '06:00' } };
+    assert.equal(T.isPeakWindow(overnight, new Date(2026, 9, 16, 23, 0)), true, '周五 23:00 在高峰');
+    assert.equal(T.isPeakWindow(overnight, new Date(2026, 9, 17, 5, 0)), true, '周六 05:00 仍属周五窗口');
+    assert.equal(T.isPeakWindow(overnight, new Date(2026, 9, 17, 7, 0)), false, '周六 07:00 已出窗口');
+  });
+
+  await c.check('effectiveTrigger：高峰用 peak 设置，其余时间用基础设置', () => {
+    const store = {
+      trigger: { mention: true, keyword: false, all: false }, replyProbability: 100,
+      peakSchedule: { enabled: true, weekdays: [1], peak: { start: '09:00', end: '18:00', trigger: { mention: false, keyword: false, all: true }, probability: 5 } }
+    };
+    const inPeak = T.effectiveTrigger(store, new Date(2026, 9, 19, 10, 0));
+    assert.equal(inPeak.peak, true);
+    assert.equal(inPeak.trigger.all, true);
+    assert.equal(inPeak.probability, 5);
+    const offPeak = T.effectiveTrigger(store, new Date(2026, 9, 19, 20, 0));
+    assert.equal(offPeak.peak, false);
+    assert.equal(offPeak.trigger.all, false);
+    assert.equal(offPeak.probability, 100);
+  });
+}
+
+// ── 2.6 llm-messages.js：思考续轮回传（2026-10-21）────────────────────
+c.section('2.6 llm-messages.js 思考消息序列');
+{
+  const M = await import('../src/llm-messages.js');
+
+  await c.check('assistantEntryFromResponse 保留 reasoning_content 与 tool_calls', () => {
+    const entry = M.assistantEntryFromResponse(
+      { content: null, tool_calls: [{ id: 't1', type: 'function', function: { name: 'x', arguments: '{}' } }], reasoning_content: '先想一下' },
+      { raw: { usage: { total_tokens: 1 } } }
+    );
+    assert.equal(entry.reasoning_content, '先想一下');
+    assert.equal(entry.tool_calls.length, 1);
+    assert.ok(entry.raw, '会话里保留 raw 供统计');
+  });
+
+  await c.check('toApiMessages：默认丢弃 raw；includeReasoning 时只给 assistant 带 reasoning', () => {
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'assistant', content: null, reasoning_content: '思考', raw: { big: 1 }, tool_calls: [{ id: 'c1' }] },
+      { role: 'tool', content: '结果', tool_call_id: 'c1', name: 'x' }
+    ];
+    const plain = M.toApiMessages(messages);
+    assert.equal(JSON.stringify(plain).includes('"raw"'), false, 'raw 不能进请求体');
+    assert.equal(JSON.stringify(plain).includes('reasoning_content'), false, '默认不带 reasoning');
+    const withR = M.toApiMessages(messages, { includeReasoning: true });
+    assert.equal(withR[1].reasoning_content, '思考');
+    assert.equal(withR[2].tool_call_id, 'c1');
+    const stripped = M.stripReasoning(withR);
+    assert.equal('reasoning_content' in stripped[1], false);
+  });
+
+  await c.check('shouldSendReasoning：仅 deepseek 且未明确关闭思考', () => {
+    assert.equal(M.shouldSendReasoning({ dialect: 'deepseek', effort: '' }), true);
+    assert.equal(M.shouldSendReasoning({ dialect: 'deepseek', effort: 'off' }), false);
+    assert.equal(M.shouldSendReasoning({ dialect: 'openai-o', effort: 'high' }), false);
+  });
+}
+
 // ── 3. md-to-plain.js ────────────────────────────────────────────────────
 c.section('3. md-to-plain.js Markdown 清洗与切分');
 {
