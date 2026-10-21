@@ -514,7 +514,25 @@ function registerAllTools() {
         if (String(entry.text || '').startsWith('[合并转发 共')) {
           return ok({ messageId: entry.mid, text: entry.text, note: '该转发已展开（读的是存档）' });
         }
-        const r = await ctx.onebot.call('get_forward_msg', { message_id: Number(entry.mid) });
+        const r = await ctx.onebot.call('get_forward_msg', { message_id: Number(entry.mid) }).catch(async (error) => {
+          // 2026-10-22：部分协议端对“引用转发/部分转发”用 message_id 取不到，
+          // 但 get_msg 里能看到 forward 的 res_id，用 {id: res_id} 能取到。
+          const msg = await ctx.onebot.call('get_msg', { message_id: Number(entry.mid) });
+          const segmentsOf = (m) => (Array.isArray(m?.message) ? m.message : []);
+          let ref = segmentsOf(msg).find((s) => s?.type === 'forward');
+          if (!ref) {
+            // 引用转发：msg 是“引用了一条转发”的消息，转发本体在 reply.id 里。
+            const reply = segmentsOf(msg).find((s) => s?.type === 'reply');
+            const quotedId = reply?.data?.id;
+            if (quotedId != null) {
+              const quoted = await ctx.onebot.call('get_msg', { message_id: Number(quotedId) });
+              ref = segmentsOf(quoted).find((s) => s?.type === 'forward') || ref;
+            }
+          }
+          const resId = ref ? String(ref.data?.id ?? ref.data?.res_id ?? '') : '';
+          if (!resId) throw error;
+          return ctx.onebot.call('get_forward_msg', { id: resId });
+        });
         const nodes = Array.isArray(r?.messages) ? r.messages : [];
         const ex = await expandForwardNodes(nodes);
         if (!ex || !ex.text) return err('转发内容为空或已被 QQ 服务端丢弃（发送时间太久）');
