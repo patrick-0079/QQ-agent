@@ -371,6 +371,42 @@ export class SendQueue {
     });
   }
 
+  /**
+   * 发送本地文件（Office 导出等）—— 走完整发送管道：串行 → 限频 → 去重 → 留档。
+   * 协议端的文件上传是 upload_group_file / upload_private_file，不能当作普通消息段。
+   */
+  sendFile(chatKey, filePath, name = '', options = {}) {
+    const [kind, id] = String(chatKey).split(':');
+    if (kind !== 'group' && kind !== 'private') return Promise.reject(new Error(`非法会话 key：${chatKey}`));
+    const abs = String(filePath || '');
+    if (!abs) return Promise.reject(new Error('文件路径为空'));
+    const fileName = String(name || abs.split(/[\\/]/).pop() || '文件');
+    const label = String(options.label || `[文件 ${fileName}]`);
+    const dedupeKey = String(options.dedupeKey || abs);
+    const chain = this.#chain(chatKey);
+    return chain(async () => {
+      if (this.#isDuplicate(chatKey, `__file__${dedupeKey}`)) {
+        throw new Error('这份文件刚刚发过，已跳过（避免重复刷屏）');
+      }
+      this.#checkRate(chatKey);
+      await sleep(randInt(500, 1200));
+      const action = kind === 'private' ? 'upload_private_file' : 'upload_group_file';
+      const base = kind === 'private' ? { user_id: Number(id) } : { group_id: Number(id) };
+      let data;
+      try {
+        data = await this.onebot.call(action, { ...base, file: toFileUri(abs), name: fileName }, 120000);
+      } catch (error) {
+        // 有些协议端不认 file:// URI，退回原始绝对路径再试一次。
+        data = await this.onebot.call(action, { ...base, file: abs, name: fileName }, 120000);
+      }
+      this.#markSent(chatKey, `__file__${dedupeKey}`);
+      const ts = Date.now();
+      this.store.appendSelf(chatKey, { text: label, ts, mid: data?.message_id ?? null });
+      this.onSent?.({ chatKey, text: label, messageId: data?.message_id ?? null, kind: 'file' });
+      return { message_id: data?.message_id ?? null };
+    });
+  }
+
   /** 拍一拍。发送成功后留档（self 记录），否则下一次运行不知道自己拍过。 */  poke(chatKey, targetUserId) {
     const [kind, id] = String(chatKey).split(':');
     const chain = this.#chain(chatKey);

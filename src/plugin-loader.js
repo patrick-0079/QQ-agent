@@ -68,9 +68,19 @@ function adaptLegacyPrompt(raw, manifest) {
  * 构造暴露给 Skill 的安全 API。
  * 与旧插件 API 的差别：多了 config / hook 注册 / 能力查询，但仍然只给白名单能力。
  */
+let runtimeSender = null;
+
+/** 由 app 在启动/热重载前注入运行时依赖（目前是发送队列 sender）。 */
+export function setSkillRuntime({ sender = null } = {}) {
+  runtimeSender = sender || null;
+}
+
 function createSkillApi(skillId, permissions = []) {
   const has = (name) => permissions.includes(name);
   return {
+    // 发送队列：插件若需要直发（文件/通知）必须先走它，避免绕过限频与留档。
+    // ⚠️ 以前这里没有 sender，导致 sleep-schedule 的发送补丁永远挂不上。
+    get sender() { return runtimeSender; },
     // 注册工具（自动加 skillId 前缀 + 绑定来源，便于开关联动与批量清理）
     registerTool: (def) => {
       if (!def?.id) throw new Error('工具必须提供 id');
@@ -463,7 +473,9 @@ async function loadSkillRoot(rootDir, { log = console.log, label = 'skill' } = {
     return { loaded: [], failed: [], missing: true, rootDir };
   }
   const dirs = fs.readdirSync(rootDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+    // 跳过 .git / .DS_Store 等元数据目录：单独给 skills/plugins 建 git 仓库后，
+    // .git 会被误当成一个 Skill 目录并报“缺少 manifest”。
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
     .map((e) => path.join(rootDir, e.name));
   if (!dirs.length) {
     log(`[${label}] ${path.basename(rootDir)}/ 为空：${rootDir}`);
@@ -486,7 +498,8 @@ async function loadSkillRoot(rootDir, { log = console.log, label = 'skill' } = {
  * 加载全部 Skill（skills/ + plugins/）。
  * 幂等：重复调用会重新加载并覆盖同 id 的 Skill（热重载依赖这个语义）。
  */
-export async function loadPlugins({ log = console.log, roots = null } = {}) {
+export async function loadPlugins({ log = console.log, roots = null, runtime = null } = {}) {
+  if (runtime) setSkillRuntime(runtime);
   const skillsRoot = roots?.skills ? path.resolve(roots.skills) : SKILLS_DIR;
   const pluginsRoot = roots?.plugins ? path.resolve(roots.plugins) : PLUGINS_DIR;
   skillManager.setLog(log);
