@@ -27,6 +27,7 @@ import { extractCandidateUrls, dispatchMediaLinks } from './media-links.js';
 import { createRoutes } from './routes.js';
 import * as instanceLockModule from './instance-lock.js';
 import { logger } from './logger.js';
+import { markSkillDefaultOff } from './skills/config.js';
 import { isChatAdmitted, isChatAdmittedById, isSkillWantedAnywhere, purgeSkillFromProfiles } from './chat-profiles.js';
 import { startCommunitySync, isGloballyBlocked, FIXED_PRICE_FEED_URL } from './community.js';
 
@@ -1621,6 +1622,8 @@ export function createApp({ log = console.log } = {}) {
       if (cfgMissing || runtimeNew) newlyInstalled.push(st.id);
     }
     if (newlyInstalled.length) {
+      // 内存兜底：配置写盘失败时 isEnabled 也不能回落到 manifest 默认开启。
+      for (const id of newlyInstalled) markSkillDefaultOff(id);
       // 一次批量写盘：逐个 setSkillConfig 会产生多次整份配置写回，Windows 上
       // 与 watcher 抢文件时更容易失败；失败时 isEnabled 会回落到 enabledByDefault。
       const patch = {};
