@@ -57,7 +57,7 @@ const byId = new Map();
 // 页签与视图桩：让 app.js 加载时能真实绑定点击事件。
 // 曾经点击处理器漏了 usage 分支，而旧桩 querySelectorAll 恒返 []，
 // 测试里根本没绑过点击事件 —— 于是"点页签空白"这个 bug 测试完全覆盖不到。
-const TAB_NAMES = ['sessions', 'chats', 'memory', 'usage', 'snowluma', 'settings'];
+const TAB_NAMES = ['chatmanage', 'usage', 'skills', 'plugins', 'snowluma', 'settings'];
 const tabStubs = TAB_NAMES.map((n) => { const el = makeEl(); el.dataset.tab = n; return el; });
 const viewStubs = TAB_NAMES.map((n) => makeEl('view-' + n));
 const document = {
@@ -219,7 +219,7 @@ const usageTab = tabStubs.find((t) => t.dataset.tab === 'usage');
 const clickHandlers = (usageTab && usageTab._ev && usageTab._ev.click) || [];
 check('用量页签已绑定点击事件', clickHandlers.length > 0);
 // 先切走、清空页面，模拟用户从别的页签点过来
-vm.runInContext("state.tab = 'sessions';", ctx);
+vm.runInContext("state.tab = 'chatmanage'; state.cmSub = 'sessions';", ctx);
 usageBox.innerHTML = '';
 for (const fn of clickHandlers) fn({ preventDefault() {} });
 let clickedHtml = '';
@@ -235,3 +235,5 @@ check('点击后不是错误提示', !clickedHtml.includes('加载失败'), clic
 await app.stop();
 console.log('\n' + (fail ? 'FAILED ' + fail : 'ALL PASSED ' + pass));
 process.exit(fail ? 1 : 0);
+
+

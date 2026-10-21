@@ -3,7 +3,7 @@
 // ── 存档视图 ──
 async function loadChats({ quiet = false } = {}) {
   try {
-    const data = await api('/api/chats');
+    const data = await api(withCmScope('/api/chats'));
     state.chats = data.chats || [];
     renderChatList();
     if (state.currentChatKey) {
@@ -894,3 +894,4 @@ function openUsageBreakdown(dim, key) {
   overlay.querySelectorAll('#ub-tabs [data-by]').forEach((x) => x.classList.toggle('btn-primary', x.dataset.by === activeBy));
   load();
 }
+

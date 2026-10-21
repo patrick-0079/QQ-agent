@@ -174,11 +174,15 @@ c.section('4. config.js 配置加载/合并/迁移');
   const { DEFAULT_CONFIG, getConfig, updateConfig, setRuntimeConfig, loadConfig, migrateLegacySkills } = cfgMod;
 
   await c.check('DEFAULT_CONFIG 关键字段齐备', () => {
-    for (const k of ['api', 'webSearch', 'security', 'snowluma', 'persona', 'allow', 'deny', 'send', 'store', 'server', 'ui', 'memory', 'sticker', 'providers']) {
+    // 2026-10-21 会话个性化：白名单（allow/allowAllWhenEmpty）由
+    // acceptAllSessions + chatProfiles 取代
+    for (const k of ['api', 'webSearch', 'security', 'snowluma', 'persona', 'deny', 'send', 'store',
+      'server', 'ui', 'memory', 'sticker', 'providers', 'acceptAllSessions', 'chatProfiles']) {
       assert.ok(DEFAULT_CONFIG[k] !== undefined, `DEFAULT_CONFIG 缺少 ${k}`);
     }
     assert.equal(DEFAULT_CONFIG.server.token, '', 'server.token 出厂应为空（只监听回环）');
     assert.equal(DEFAULT_CONFIG.security.allowPrivateImageHosts, false, '图片内网开关应默认关闭');
+    assert.deepEqual(DEFAULT_CONFIG.chatProfiles, {}, 'chatProfiles 出厂应为空表');
   });
 
   await c.check('updateConfig：深合并保留未提及字段，写入立即生效', () => {

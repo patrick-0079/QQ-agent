@@ -13,7 +13,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { getConfig, updateConfig, deepMerge as deepMergeConfig, DATA_DIR } from './config.js';
+import { getConfig, getGlobalConfig, updateConfig, deepMerge as deepMergeConfig, DATA_DIR } from './config.js';
+import {
+  listChatSessions, upsertProfile, getProfile, removeProfile,
+  patchProfileOverrides, clearProfileSection,
+  effectiveConfigForChat, withChatScope, isChatAdmitted,
+  isSkillWantedAnywhere, isValidChatKey, makeChatKey, isChatDenied,
+  profiledChatKeys,
+  listProfiles as listAllProfiles
+} from './chat-profiles.js';
 import { customSearch } from './web-search.js';
 import { listModels, chatCompletion, resolveApiKey, estimateCost, cacheHitRate } from './llm.js';
 import { resolveOfficialPrice, listOfficialPrices } from './model-prices.js';
@@ -53,6 +61,42 @@ export function createRoutes(deps) {
     buildUsageStats, buildUsageBreakdown,
     reloadSkills
   } = deps;
+
+  /**
+   * 用量接口的会话口径：?chat=<key|default> → chatKey 白名单。
+   *   null = 全局（不筛）；[] = 默认会话当前没有任何会话（返回 0 用量）；
+   *   [key] = 单个会话。
+   * 默认会话 = 所有已知会话里没被单独配置的那些（与列表/存档/记忆同一口径）。
+   */
+  const usageChatKeys = (chat) => {
+    const c = String(chat || '').trim();
+    if (!c) return null;
+    if (c !== 'default') return [c];
+    const profiled = profiledChatKeys();
+    const keys = new Set();
+    try { for (const k of (store.listChats?.() || [])) keys.add(k); } catch { /* ignore */ }
+    try { for (const e of (sessions.index || [])) if (e?.chatKey) keys.add(e.chatKey); } catch { /* ignore */ }
+    try { for (const k of (memory.listChats?.() || [])) keys.add(k); } catch { /* ignore */ }
+    return [...keys].filter((k) => !profiled.has(k));
+  };
+
+  /**
+   * 会话口径过滤：?chat=<key|default>。
+   *   · 空/缺省 → null（不筛，保持旧行为）
+   *   · default → 所有"没被单独配置"的会话（默认会话 = 其余所有会话）
+   *   · group:123 / private:456 → 精确匹配
+   * 只做展示口径过滤，不影响准入判定（准入在 isChatAdmitted，黑名单优先级最高）。
+   */
+  const chatScopeFilter = (chat) => {
+    const c = String(chat || '').trim();
+    if (!c) return null;
+    if (c !== 'default') return (key) => String(key || '') === c;
+    const profiled = profiledChatKeys();
+    return (key) => {
+      const k = String(key || '');
+      return Boolean(k) && !profiled.has(k);
+    };
+  };
 
   // 小工具：读请求体（容错：没 body 当空对象）。
   // 但 readBody 明确标记的可暴露错误（400 非法 JSON / 413 过大）必须透传，
@@ -193,8 +237,9 @@ export function createRoutes(deps) {
       handler: async ({ res, json, url }) => {
         try {
           const raw = String(url.searchParams.get('range') || url.searchParams.get('days') || '7');
-          const stats = await buildUsageStats({ range: raw });
-          return json(res, 200, { ok: true, range: raw, ...stats });
+          const chat = String(url.searchParams.get('chat') || '').trim();
+          const stats = await buildUsageStats({ range: raw, chatKeys: usageChatKeys(chat) });
+          return json(res, 200, { ok: true, range: raw, chat: chat || null, ...stats });
         } catch (error) {
           return json(res, 500, { ok: false, error: String(error?.message ?? error) });
         }
@@ -724,8 +769,15 @@ export function createRoutes(deps) {
 
     // ── 配置 ─────────────────────────────────────────────────────────
     {
+      // ?chat=group:123 / private:456 → 返回该会话的**生效配置**（默认 + 覆盖）。
+      // 不传 = 默认（全局）配置。凭据字段始终脱敏。
       method: 'GET', pattern: '/api/config',
-      handler: async ({ res, json }) => json(res, 200, sanitizeConfig(getConfig()))
+      handler: async ({ res, json, url }) => {
+        const chat = String(url?.searchParams?.get('chat') || '').trim();
+        if (!chat) return json(res, 200, sanitizeConfig(getConfig()));
+        if (!isValidChatKey(chat)) return json(res, 400, { error: `非法会话标识：${chat}` });
+        return json(res, 200, sanitizeConfig(effectiveConfigForChat(chat)));
+      }
     },
     {
       // 完整系统提示词预览：按**当前**插件/技能/工具启用状态组装（没开的不出现），
@@ -738,34 +790,44 @@ export function createRoutes(deps) {
       // 调用方把"当前工具面板状态"随请求发来，这里先 deepMerge 到临时副本上组装
       // （绝不写回 currentConfig），预览就能立即反映未保存的开关。
       method: '*', pattern: '/api/prompt-preview',
-      handler: async ({ req, res, json }) => {
-        const cfg = getConfig();
-        let overrides = {};
-        try {
-          if (req.method === 'POST') overrides = (await bodyOf(req)) || {};
-        } catch { overrides = {}; }
-        const effective = Object.keys(overrides).length
-          ? deepMergeConfig(structuredClone(cfg), structuredClone(overrides))
-          : cfg;
-        const skillContext = {
-          skills: skillManager,
-          toolsCfg: effective.tools || {},
-          visionEnabled: effective.api?.vision !== false
-            && modelImageVerdict(effective.api?.provider, effective.api?.model) !== 'no-vision',
-          searchEnabled: effective.webSearch?.enabled !== false,
-          runtimeContext: { model: effective.api?.model || '', provider: effective.api?.provider || '', source: 'api' }
+      handler: async ({ req, res, json, url }) => {
+        // ?chat= → 先并上该会话的配置覆盖，再做"未保存开关"的临时合并
+        const chat = String(url?.searchParams?.get('chat') || '').trim();
+        const runPreview = async () => {
+          const cfg = getConfig();
+          let overrides = {};
+          try {
+            if (req.method === 'POST') overrides = (await bodyOf(req)) || {};
+          } catch { overrides = {}; }
+          const effective = Object.keys(overrides).length
+            ? deepMergeConfig(structuredClone(cfg), structuredClone(overrides))
+            : cfg;
+          const skillContext = {
+            skills: skillManager,
+            toolsCfg: effective.tools || {},
+            visionEnabled: effective.api?.vision !== false
+              && modelImageVerdict(effective.api?.provider, effective.api?.model) !== 'no-vision',
+            searchEnabled: effective.webSearch?.enabled !== false,
+            runtimeContext: { model: effective.api?.model || '', provider: effective.api?.provider || '', source: 'api' }
+          };
+          return { skillContext, chat };
         };
-        const { buildSystemPrompt } = await import('./prompt.js');
-        const { buildToolDefs } = await import('./tools.js');
-        const { getToolAvailability } = await import('./tool-registry.js');
-        // 可用工具清单与 orchestrator 同一口径（tools.js 的 def → OpenAI 函数名）
-        const tools = buildToolDefs()
-          .filter((d) => getToolAvailability(d.id, skillContext).enabled)
-          .map((d) => ({ id: d.id, name: d.name, description: d.description, category: d.category }));
-        return json(res, 200, {
-          systemPrompt: buildSystemPrompt({ skillContext }),
-          tools
-        });
+        const buildResponse = ({ skillContext, chat }) => (async () => {
+          const { buildSystemPrompt } = await import('./prompt.js');
+          const { buildToolDefs } = await import('./tools.js');
+          const { getToolAvailability } = await import('./tool-registry.js');
+          // 可用工具清单与 orchestrator 同一口径（tools.js 的 def → OpenAI 函数名）
+          const tools = buildToolDefs()
+            .filter((d) => getToolAvailability(d.id, skillContext).enabled)
+            .map((d) => ({ id: d.id, name: d.name, description: d.description, category: d.category }));
+          return json(res, 200, {
+            systemPrompt: buildSystemPrompt({ skillContext }),
+            tools,
+            chat: chat || null
+          });
+        })();
+        if (chat && isValidChatKey(chat)) return withChatScope(chat, runPreview).then(buildResponse);
+        return buildResponse(runPreview());
       }
     },
     {
@@ -887,10 +949,16 @@ export function createRoutes(deps) {
         if (!/^[A-Z0-9]{4,12}$/.test(code)) return json(res, 400, { ok: false, error: '口令格式无效' });
         try {
           const r = await installByCode({ code, verified: body?.entry || null });
+          // 2026-10-21：新安装默认不启用（全局默认关闭，随后按会话/默认设置里手动开）。
+          // 必须在重扫之前写配置 —— reloadSkills 的激活策略按配置判定。
+          try {
+            const cur = getGlobalConfig()?.skills?.[r.id];
+            if (!cur || cur.enabled === undefined) setSkillConfig(r.id, { enabled: false });
+          } catch { /* 写开关失败不阻塞安装 */ }
           // 安装完立即重扫，让新模块马上出现在页签里（热重载 watcher 也行，
           // 但目录删除重建的场景 watcher 会丢事件 —— reload 是唯一可靠路径）
           try { await reloadSkills({ reason: 'market-install' }); } catch { /* 重扫失败不影响安装结果 */ }
-          return json(res, 200, { ok: true, kind: r.kind, id: r.id, dir: r.dir });
+          return json(res, 200, { ok: true, kind: r.kind, id: r.id, dir: r.dir, enabled: false });
         } catch (error) {
           return json(res, 502, { ok: false, error: String(error?.message ?? error) });
         }
@@ -900,28 +968,40 @@ export function createRoutes(deps) {
     // ── Skill 管理 ─────────────────────────────────────────────────────
     // 统一开关入口：前端只改这里，模块内部一律读 skillManager。
     {
+      // 会话作用域口径：?chat=group:x 时技能列表/摘要按"该会话生效"计算
+      //（未传 chat = 全局默认视图）。
       method: 'GET', pattern: '/api/skills',
-      handler: async ({ res, json }) => {
-        const context = skillRuntimeContext();
-        // uninstalled：配置里还有 skills.<id> 段、但磁盘上已经没有这个条目
-        // （删目录后的配置残留）。UI 显示成"已配置但未安装"，并提供一键清理。
-        const installedIds = new Set(skillManager.list(context).map((s) => s.id));
-        const uninstalled = listConfiguredSkillIds()
-          .filter((id) => !installedIds.has(id))
-          .map((id) => {
-            const c = getConfig()?.skills?.[id] || {};
-            return {
-              id,
-              enabled: c.enabled !== false,
-              hasSettings: Object.keys(c).some((k) => k !== 'enabled')
-            };
+      handler: async ({ res, json, url }) => {
+        const chat = String(url?.searchParams?.get('chat') || '').trim();
+        const build = () => {
+          const context = skillRuntimeContext();
+          // uninstalled：配置里还有 skills.<id> 段、但磁盘上已经没有这个条目
+          // （删目录后的配置残留）。UI 显示成"已配置但未安装"，并提供一键清理。
+          const installedIds = new Set(skillManager.list(context).map((s) => s.id));
+          const configuredIds = chat
+            ? Object.keys(effectiveConfigForChat(chat)?.skills || {})
+            : listConfiguredSkillIds();
+          const uninstalled = configuredIds
+            .filter((id) => !installedIds.has(id))
+            .map((id) => {
+              const c = effectiveConfigForChat(chat)?.skills?.[id]
+                || getGlobalConfig()?.skills?.[id] || {};
+              return {
+                id,
+                enabled: c.enabled !== false,
+                hasSettings: Object.keys(c).some((k) => k !== 'enabled')
+              };
+            });
+          return json(res, 200, {
+            skills: skillManager.list(context),
+            summary: skillManager.summary(context),
+            capabilities: skillManager.capabilities.list().sort(),
+            uninstalled,
+            chat: chat || null
           });
-        return json(res, 200, {
-          skills: skillManager.list(context),
-          summary: skillManager.summary(context),
-          capabilities: skillManager.capabilities.list().sort(),
-          uninstalled
-        });
+        };
+        if (chat && isValidChatKey(chat)) return withChatScope(chat, build);
+        return build();
       }
     },
     {
@@ -980,30 +1060,51 @@ export function createRoutes(deps) {
     },
     {
       // 单个 Skill：切开关 / 改设置。两个动作分开处理，避免"改了设置顺手把我开着的关了"。
+      // body: { enabled?, settings?, chat? }
+      //   · 无 chat（默认）→ 写**全局默认配置**（"默认设置"里的技能开关）
+      //   · 有 chat=group:x → 写该会话 profile 的覆盖（"会话个性化"面板的开关）
+      // 生命周期口径：只要"全局默认启用 或 任一会话启用"就 activate；
+      // 文件只装一份，启用状态是配置层面的事。
       method: 'POST', pattern: /^\/api\/skills\/([^/]+)$/,
       handler: async ({ req, res, json, match }) => {
         const id = decodeURIComponent(match[1]);
         const body = await bodyOf(req);
+        const chatKey = String(body?.chat || '').trim();
+        let scopeProfile = null;
+        if (chatKey) {
+          if (!isValidChatKey(chatKey)) return json(res, 400, { ok: false, error: `非法会话标识：${chatKey}` });
+          scopeProfile = patchProfileOverrides(chatKey, {});
+        }
         const context = skillRuntimeContext();
         const skill = skillManager.registry.get(id);
         if (!skill) return json(res, 404, { ok: false, error: `Skill 不存在：${id}` });
+        const dflt = skill.manifest?.enabledByDefault !== false;
 
-        // 1) 开关（先写配置，再跑生命周期；顺序不能反 ——
+        // 1) 开关（先写配置，再同步生命周期；顺序不能反 ——
         //    activate 里读配置必须已经生效，否则 Skill 会以为自己是关闭的）
         if (body.enabled !== undefined) {
-          setSkillEnabled(id, !!body.enabled);
-          if (body.enabled) skillManager.activate(id, context);
+          if (chatKey) {
+            const prev = getProfile(chatKey)?.overrides?.skills?.[id];
+            const mergedSettings = { ...(prev && typeof prev === 'object' ? prev : {}), enabled: !!body.enabled };
+            patchProfileOverrides(chatKey, { skills: { [id]: mergedSettings } });
+          } else {
+            setSkillEnabled(id, !!body.enabled);
+          }
+          if (isSkillWantedAnywhere(id, dflt)) skillManager.activate(id, context);
           else skillManager.deactivate(id, context);
         }
 
-        // 2) 设置（只允许改 manifest 声明过的键，防止前端塞垃圾字段进配置）
+        // 2) 设置（只允许改 manifest 声明过的键，防止前端塞垃圾字段进配置）。
+        //    会话作用域下写进该会话的 profile（skills[id].settings 覆盖）。
         if (body.settings && typeof body.settings === 'object') {
           const allowed = new Set([
             ...Object.keys(skill.manifest.settings || {}),
             ...Object.keys(skill.manifest.configSchema || {})
           ]);
           const schema = skill.manifest.configSchema || {};
-          const current = getSkillConfig(id, skill.manifest.settings || {});
+          const current = chatKey
+            ? { ...(getProfile(chatKey)?.overrides?.skills?.[id] || {}), ...skillManager.settingsView(id) }
+            : getSkillConfig(id, skill.manifest.settings || {});
           const patch = {};
           // ⚠️ 与 settingsView 同一套口径（2026-09-26 审查二轮）：
           //    ① secret 标记；② 字段名命中 /key|token|secret|password|cookie/i 的
@@ -1018,18 +1119,30 @@ export function createRoutes(deps) {
             if (isSecretField(k) && (v === '******' || String(v ?? '').trim() === '')) continue;
             patch[k] = v;
           }
-          if (Object.keys(patch).length) setSkillConfig(id, patch);
+          if (Object.keys(patch).length) {
+            if (chatKey) {
+              const prev = getProfile(chatKey)?.overrides?.skills?.[id];
+              patchProfileOverrides(chatKey, { skills: { [id]: { ...(prev && typeof prev === 'object' ? prev : {}), ...patch } } });
+            } else {
+              setSkillConfig(id, patch);
+            }
+          }
         }
 
         emit('status', { configUpdated: true });
+        // 会话作用域下返回该会话视角的状态（isEnabled 读生效配置）
+        const statusView = () => (chatKey
+          ? withChatScope(chatKey, () => skillManager.status(id, skillRuntimeContext()))
+          : skillManager.status(id, context));
         return json(res, 200, {
           ok: true,
-          skill: skillManager.status(id, context),
+          skill: statusView(),
           // ⚠️ 响应里的 settings 必须用脱敏视图（settingsView）：
           //    曾经直接回 getSkillConfig（明文），保存一次设置就把
           //    apiKey / Cookie 原文发回浏览器，与 GET 列表的脱敏口径相反。
           settings: skillManager.settingsView(id),
-          config: sanitizeConfig(getConfig())
+          config: sanitizeConfig(chatKey ? effectiveConfigForChat(chatKey) : getConfig()),
+          chat: chatKey || null
         });
       }
     },
@@ -1049,22 +1162,29 @@ export function createRoutes(deps) {
     },
     {
       // 工具可用性总览：明确告诉 UI "这个工具为什么没生效"
+      // ?chat= → 按该会话生效配置计算（tools/skills 的覆盖都参与）。
       method: 'GET', pattern: '/api/tools/availability',
-      handler: async ({ res, json }) => {
-        const context = skillRuntimeContext();
-        const availability = availabilityOf(context);
-        const defs = new Map(listTools().map((t) => [t.id, t]));
-        return json(res, 200, {
-          categories: CATEGORY_META,
-          tools: availability.map((a) => ({
-            id: a.id,
-            category: defs.get(a.id)?.category || 'system',
-            skillId: a.skillId,
-            enabled: a.enabled,
-            code: a.code,
-            reason: a.reason
-          }))
-        });
+      handler: async ({ res, json, url }) => {
+        const chat = String(url?.searchParams?.get('chat') || '').trim();
+        const build = () => {
+          const context = skillRuntimeContext();
+          const availability = availabilityOf(context);
+          const defs = new Map(listTools().map((t) => [t.id, t]));
+          return json(res, 200, {
+            categories: CATEGORY_META,
+            chat: chat || null,
+            tools: availability.map((a) => ({
+              id: a.id,
+              category: defs.get(a.id)?.category || 'system',
+              skillId: a.skillId,
+              enabled: a.enabled,
+              code: a.code,
+              reason: a.reason
+            }))
+          });
+        };
+        if (chat && isValidChatKey(chat)) return withChatScope(chat, build);
+        return build();
       }
     },
 
@@ -1083,6 +1203,129 @@ export function createRoutes(deps) {
         //    accessToken / dshProviderKeys。GET /api/config 一直是脱敏的，
         //    这里漏掉会让"任何一次保存设置"把全部明文密钥回传给浏览器。
         return json(res, 200, { ok: true, config: sanitizeConfig(next) });
+      }
+    },
+
+    // ── 会话个性化（chatProfiles）：列表 / CRUD / 覆盖项 ──────────────
+    {
+      // 会话列表：默认配置 + 已准入会话 + 各数据源发现到的会话，供左栏渲染。
+      method: 'GET', pattern: '/api/chat-profiles',
+      handler: async ({ res, json }) => {
+        const data = await listChatSessions({
+          store,
+          sessions,
+          memory,
+          getChatName: async (parsed) => {
+            if (parsed.kind !== 'group') return '';
+            try {
+              return await Promise.race([
+                orchestrator.getChatName(parsed.id),
+                new Promise((r) => setTimeout(() => r(''), 1500))
+              ]) || '';
+            } catch { return ''; }
+          }
+        });
+        return json(res, 200, { ok: true, ...data, deny: getGlobalConfig().deny || { groups: [], private: [] } });
+      }
+    },
+    {
+      method: 'POST', pattern: '/api/chat-profiles',
+      handler: async ({ req, res, json }) => {
+        const body = await bodyOf(req);
+        const key = String(body?.key || makeChatKey(body?.kind, body?.id) || '').trim();
+        if (!isValidChatKey(key)) return json(res, 400, { ok: false, error: '缺少或非法的会话标识（key 或 kind+id）' });
+        const profile = upsertProfile(key, { alias: body?.alias, pinnedAt: body?.pinnedAt });
+        emit('status', { chatProfilesChanged: true, key });
+        return json(res, 200, { ok: true, profile });
+      }
+    },
+    {
+      method: 'GET', pattern: /^\/api\/chat-profiles\/(group|private):([A-Za-z0-9_-]+)$/,
+      handler: async ({ res, json, match }) => {
+        const key = `${match[1]}:${match[2]}`;
+        if (!isValidChatKey(key)) return json(res, 400, { ok: false, error: `非法会话标识：${key}` });
+        const profile = getProfile(key);
+        return json(res, 200, {
+          ok: true,
+          key,
+          profile,
+          admitted: isChatAdmitted(key),
+          default: sanitizeConfig(getGlobalConfig()),
+          effective: sanitizeConfig(effectiveConfigForChat(key)),
+          overrides: profile?.overrides || {}
+        });
+      }
+    },
+    {
+      method: 'PATCH', pattern: /^\/api\/chat-profiles\/(group|private):([A-Za-z0-9_-]+)$/,
+      handler: async ({ req, res, json, match }) => {
+        const body = await bodyOf(req);
+        const key = `${match[1]}:${match[2]}`;
+        try {
+          const profile = upsertProfile(key, body || {});
+          emit('status', { chatProfilesChanged: true, key });
+          return json(res, 200, { ok: true, profile });
+        } catch (error) {
+          return json(res, 400, { ok: false, error: String(error?.message ?? error) });
+        }
+      }
+    },
+    {
+      method: 'DELETE', pattern: /^\/api\/chat-profiles\/(group|private):([A-Za-z0-9_-]+)$/,
+      handler: async ({ res, json, match }) => {
+        const key = `${match[1]}:${match[2]}`;
+        const removed = removeProfile(key);
+        emit('status', { chatProfilesChanged: true, key });
+        return json(res, 200, { ok: true, removed, admitted: isChatAdmitted(key) });
+      }
+    },
+    {
+      method: 'PUT', pattern: /^\/api\/chat-profiles\/(group|private):([A-Za-z0-9_-]+)\/overrides$/,
+      handler: async ({ req, res, json, match }) => {
+        const body = await bodyOf(req);
+        const overrides = body && typeof body === 'object' && 'overrides' in body ? body.overrides : body;
+        if (overrides !== null && overrides !== undefined && typeof overrides !== 'object') {
+          return json(res, 400, { ok: false, error: 'overrides 必须是对象' });
+        }
+        const key = `${match[1]}:${match[2]}`;
+        try {
+          // 只有"默认设置"里那批可按会话自定义的字段能进覆盖；其余剥掉并回告。
+          // 用深合并而不是整体替换：前端每次只提交一个分区。
+          const sanitized = overrides && typeof overrides === 'object' ? Object.keys(overrides) : [];
+          const disallowed = [];
+          for (const top of sanitized) {
+            if (!['persona', 'memory', 'store', 'tools', 'skills', 'proactive', 'chatActive', 'sticker', 'commandMute', 'blocklist'].includes(top)) {
+              disallowed.push(top);
+            }
+          }
+          const r = patchProfileOverrides(key, overrides || {});
+          emit('status', { chatProfilesChanged: true, key });
+          return json(res, 200, {
+            ok: true, profile: r.profile, overrides: r.overrides,
+            ignored: disallowed,
+            effective: sanitizeConfig(effectiveConfigForChat(key))
+          });
+        } catch (error) {
+          return json(res, 400, { ok: false, error: String(error?.message ?? error) });
+        }
+      }
+    },
+    {
+      method: 'DELETE', pattern: /^\/api\/chat-profiles\/(group|private):([A-Za-z0-9_-]+)\/overrides\/([A-Za-z0-9_-]+)$/,
+      handler: async ({ res, json, match }) => {
+        const key = `${match[1]}:${match[2]}`;
+        const section = match[3];
+        try {
+          const r = clearProfileSection(key, section);
+          if (!r.cleared && !r.profile) return json(res, 404, { ok: false, error: '该会话还没有覆盖项' });
+          emit('status', { chatProfilesChanged: true, key });
+          return json(res, 200, {
+            ok: true, section, profile: r.profile,
+            effective: sanitizeConfig(effectiveConfigForChat(key))
+          });
+        } catch (error) {
+          return json(res, 400, { ok: false, error: String(error?.message ?? error) });
+        }
       }
     },
     {
@@ -1143,7 +1386,9 @@ export function createRoutes(deps) {
       method: 'GET', pattern: '/api/sessions',
       handler: async ({ res, json, url }) => {
         const limit = Math.min(1048576, Math.max(1, Number(url.searchParams.get('limit')) || 1048576));
-        return json(res, 200, { sessions: sessions.listSummaries(limit) });
+        const filter = chatScopeFilter(url.searchParams.get('chat'));
+        const rows = sessions.listSummaries(limit).filter((s) => !filter || filter(s.chatKey));
+        return json(res, 200, { sessions: rows });
       }
     },
     {
@@ -1196,8 +1441,10 @@ export function createRoutes(deps) {
     },
     {
       method: 'GET', pattern: '/api/chats',
-      handler: async ({ res, json }) => {
+      handler: async ({ res, json, url }) => {
+        const filter = chatScopeFilter(url.searchParams.get('chat'));
         const chats = store.listChats().map((key) => ({ key, ...store.getChatMeta(key) }))
+          .filter((c) => !filter || filter(c.key))
           .sort((a, b) => b.lastTs - a.lastTs);
         await Promise.allSettled(chats.map(async (c) => {
           const m = /^group:(\d+)$/.exec(String(c.key || ''));
@@ -1216,7 +1463,8 @@ export function createRoutes(deps) {
     // ── 记忆 ─────────────────────────────────────────────────────────
     {
       method: 'GET', pattern: '/api/memory-files',
-      handler: async ({ res, json }) => {
+      handler: async ({ res, json, url }) => {
+        const filter = chatScopeFilter(url.searchParams.get('chat'));
         const files = memory.listChats().map((chatKey) => {
           const members = memory.members(chatKey);
           const impressionCount = members.reduce((n, m) => n + m.impressions.length, 0);
@@ -1226,18 +1474,17 @@ export function createRoutes(deps) {
           };
         });
         const seen = new Set(files.map((f) => f.chatKey));
-        for (const gid of (getConfig().allow?.groups || [])) {
-          const key = `group:${String(gid)}`;
-          if (!seen.has(key)) files.push({ chatKey: key, impressionCount: 0, memberCount: 0, updatedAt: 0, consolidating: false });
-        }
-        for (const uid of (getConfig().allow?.private || [])) {
-          const key = `private:${String(uid)}`;
-          if (!seen.has(key)) files.push({ chatKey: key, impressionCount: 0, memberCount: 0, updatedAt: 0, consolidating: false });
+        // 准入的会话即使还没有记忆文件也占位展示（原白名单行为）
+        for (const key of Object.keys(getGlobalConfig().chatProfiles || {})) {
+          if (!seen.has(key)) {
+            files.push({ chatKey: key, impressionCount: 0, memberCount: 0, updatedAt: 0, consolidating: false });
+          }
         }
         const busy = orchestrator.consolidating;
         for (const f of files) f.consolidating = busy.has(f.chatKey);
         files.sort((a, b) => b.updatedAt - a.updatedAt);
-        return json(res, 200, { files, consolidating: [...busy] });
+        const scoped = filter ? files.filter((f) => filter(f.chatKey)) : files;
+        return json(res, 200, { files: scoped, consolidating: [...busy] });
       }
     },
     {
@@ -1392,24 +1639,15 @@ export function createRoutes(deps) {
         const body = await readBody(req);
         const text = String(body.text ?? '').trim();
         if (!text) return json(res, 400, { error: '消息内容为空' });
-        // ⚠️ 白名单闸（2026-09-26 审查二轮）：本端点曾接受任意 group/private id ——
-        //   任何通过来源校验的本地进程都能借它向**白名单外**的群/私聊发消息
-        //   （绕过 send_to 工具的硬校验，等于给管理端开了一条无白名单的发送通道）。
-        //   现在与 app.allowed() 同口径：deny 优先；allow 非空时必须在名单内；
-        //   全空时必须显式开 allowAllWhenEmpty。
+        // ⚠️ 准入闸（2026-09-26 审查二轮遗留，2026-10-21 口径更新）：与消息入口同口径 ——
+        //   deny 优先；acceptAllSessions 或该会话已添加到会话自定义（chatProfiles）才放行。
         const kind = match[1];
         const id = match[2];
-        const cfgNow = getConfig();
-        const denyList = cfgNow.deny?.[kind] ?? cfgNow.deny?.[`${kind}s`] ?? [];
-        if (denyList.map(String).includes(String(id))) {
-          return json(res, 403, { error: '该会话在黑名单内，不能发送' });
-        }
-        const allowList = cfgNow.allow?.[kind] ?? cfgNow.allow?.[`${kind}s`] ?? [];
-        const allowed = allowList.length > 0
-          ? allowList.map(String).includes(String(id))
-          : cfgNow.allowAllWhenEmpty === true;
-        if (!allowed) {
-          return json(res, 403, { error: '该会话不在白名单内，不能发送（先在设置里加白名单，或开启空白名单放行）' });
+        if (!isChatAdmitted(`${kind}:${id}`)) {
+          const why = isChatDenied(`${kind}:${id}`)
+            ? '该会话在黑名单里（黑名单优先级最高：即使已添加到会话或开启"接受所有会话"也拒绝处理）'
+            : '该会话未被准入（未添加到会话自定义且未开启"接受所有会话"），不能发送';
+          return json(res, 403, { error: why });
         }
         try {
           const chatKey = `${kind}:${id}`;
@@ -1576,3 +1814,4 @@ export function createRoutes(deps) {
     },
   ];
 }
+

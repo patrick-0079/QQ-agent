@@ -214,23 +214,19 @@ function createTierBar({ mount, dual = false, low = 100, high = 10, onChange = n
 }
 
 /**
- * 「活跃设置」编辑器（2026-09-24 改版：从两级模态框整体搬进聊天设置的
- * 「活跃设置」折叠卡内联展示 —— 「打开活跃设置编辑器」按钮与两个模态框取消，
- * 原「档位设置」子模态框的内容（各档条数 / 关键词表 / 被召唤后持续参与 /
- * 活跃期）一并摊平进折叠卡）。
+ * 「活跃设置」编辑器（2026-10-21 会话个性化版）。
  *
- * 布局：左侧一条**竖向**档位滑条（1 档在下、4 档在上，轨道下蓝上黄渐变），
- *       右侧是开关与参数。统一/分群**共用同一条滑条** —— 分群模式下它编辑
- *       当前选中的群（群按钮列表选择），从结构上消灭了
- *       "两套滑条 id + 按元素存在性猜象限"这一类 bug。
- * 峰谷：同一条滑条上两颗珠 —— 上面那颗（档位更高）= 低谷时段档位，
- *       下面那颗 = 高峰时段档位，互不交叉；两珠之间画一条半透明区间带。
- * 保存语义与原模态框一致：改动先落草稿，点「保存」整体提交
- * （store / chatActive 一次写盘），「取消」放弃未保存的改动。
- * 「每个群聊单独设置」开关在折叠卡头部；「指令禁言」已独立成自己的折叠卡
- * （走设置页自动保存），不再进这里的草稿。峰谷的启用开关在「峰谷设置」按钮内。
+ * 只编辑"当前选中作用域"的一套档位：
+ *   · 「默认设置」面板 → 全局默认档位（所有未自定义会话的默认值）
+ *   · 某个群/私聊面板 → 该会话的覆盖（提交后写进 profile.overrides.store）
+ * 旧的「统一设置开关 + 分群按钮 + groupSliderPos/groupPeakPos 两张图」已删除：
+ *   会话"维度"由设置页左栏的会话列表承担，映射表不再存在。
  *
- * 用法：renderChatSection 渲染 `<div id="ac-editor"></div>` 占位，
+ * 峰谷：同一条滑条上两颗珠 —— 上 = 低谷档位、下 = 高峰档位。
+ * 保存语义：拖动/切换即并入当前作用域（自动保存，与设置页其他分区一致），
+ * "恢复默认"按钮在分区菜单行尾（会话作用域下才有）。
+ *
+ * 用法：renderChatSection 渲染 `<div id="ac-editor"></div>`，
  *      bindSettingsEvents 每次重渲染后调 mountActiveConfigEditor(root) 挂载。
  */
 function mountActiveConfigEditor(root) {
@@ -239,38 +235,14 @@ function mountActiveConfigEditor(root) {
   const st = c.store || {};
   const B = TIER_SLIDER_BANDS;
   const ps = st.peakSchedule || {};
-  const unified0 = st.unifiedTier !== false;
   const peakOn0 = ps.enabled === true;
-  const globalPos = sliderToTierUI_tierToSlider(st);
+  const pos0 = sliderToTierUI_tierToSlider(st);
+  const tier0 = sliderToTierUI(peakOn0 ? clampNum(ps.valley?.sliderPos, pos0) : pos0).tier;
+  const peakTier0 = peakOn0 ? sliderToTierUI(clampNum(ps.peak?.sliderPos, 10)).tier : -1;
+  const scopeText = (!isSessionScope() && state.settingsScope === 'default')
+    ? '全局默认档位（未单独自定义的会话都用它）'
+    : `${chatTitleOf(state.settingsScope)} 的专属档位`;
 
-  // ── 草稿（闭包工作副本；保存时整体提交，取消即弃）──
-  let dContextPos = globalPos;
-  let dPeak = {
-    start: String(ps.peak?.start || '09:00'),
-    end: String(ps.peak?.end || '18:00'),
-    peakPos: clampNum(ps.peak?.sliderPos, 10),     // 高峰（安静）档位点
-    valleyPos: clampNum(ps.valley?.sliderPos, 100) // 低谷（活跃）档位点
-  };
-  // 分群两张图：拷贝时剔除 __ 开头的内部键（旧版 __preview 草稿残留一并清掉，不再随图往返）
-  const stripInternal = (m) => Object.fromEntries(Object.entries(m || {}).filter(([k]) => !String(k).startsWith('__')));
-  const dGroupPos = stripInternal(st.groupSliderPos);
-  const dGroupPeak = stripInternal(st.groupPeakPos);
-  let activeGid = '';
-
-  // 峰谷时段字段与各档条数等已收进「峰谷设置」「档位参数与持续参与」两个模态框
-  // （打开按钮见下方 ac-right），主编辑器只留滑条 / 分群。
-
-  // 竖向四段刻度：滑条"1 档在下、4 档在上"，说明文字也按同向排列 ——
-  // 低档位的描述在下、高档位的描述在上（与珠子位置一一对应，读起来不用翻转）。
-  const tier0 = sliderToTierUI(peakOn0 ? dPeak.valleyPos : globalPos).tier;
-  const peakTier0 = peakOn0 ? sliderToTierUI(dPeak.peakPos).tier : -1;
-  // 分段轨道/分隔线/拇指全部是静态 markup（设计稿同款，见模板）——
-  // 档位反馈由拇指位 + 大号读数 + 预设高亮承担，不再做分段动态高亮。
-
-  // 档位参数行模板随「档位参数与持续参与」模态框定义（openTierParamsModal）。
-
-  // 内联挂载：内容直接放进折叠卡的 #ac-editor 容器（不再是模态框）。
-  // 下方所有 overlay.querySelector 就地作用于该容器 —— 绑定逻辑与原模态框一致。
   root.innerHTML = `
       <div class="ac-tier-wrap">
         <div class="tier-scale" id="ac-slider" data-dual="${peakOn0 ? '1' : '0'}">
@@ -281,55 +253,32 @@ function mountActiveConfigEditor(root) {
           <div class="tier-sep" style="left:${B.tier1End}%"></div>
           <div class="tier-sep" style="left:${B.tier2End}%"></div>
           <div class="tier-sep" style="left:${B.tier3End}%"></div>
-          <div class="tier-knob knob-valley" style="left:${peakOn0 ? dPeak.valleyPos : globalPos}%"></div>
-          <div class="tier-knob knob-peak" style="left:${dPeak.peakPos}%;${peakOn0 ? '' : 'display:none'}"></div>
+          <div class="tier-knob knob-valley" style="left:${peakOn0 ? clampNum(ps.valley?.sliderPos, pos0) : pos0}%"></div>
+          <div class="tier-knob knob-peak" style="left:${clampNum(ps.peak?.sliderPos, 10)}%;${peakOn0 ? '' : 'display:none'}"></div>
         </div>
         <div class="tier-read">
           <span class="tr-big" id="ac-tier-num">${peakOn0 && peakTier0 >= 1 && peakTier0 !== tier0 ? `峰 ${peakTier0} 档 · 谷 ${tier0} 档` : `${tier0} 档`}</span>
-          <span class="tr-txt" id="ac-tier-note">${peakOn0 ? `高峰：${descOf(dPeak.peakPos)}<br>低谷：${descOf(dPeak.valleyPos)}` : descOf(peakOn0 ? dPeak.valleyPos : globalPos)}</span>
+          <span class="tr-txt" id="ac-tier-note">${peakOn0
+            ? `高峰：${descOf(clampNum(ps.peak?.sliderPos, 10))}<br>低谷：${descOf(clampNum(ps.valley?.sliderPos, pos0))}`
+            : descOf(pos0)}</span>
         </div>
-        <div class="hint ac-target" id="ac-target"></div>
-      </div>
-      <div class="ac-right">
-          <div id="ac-group-area"${unified0 ? ' style="display:none"' : ''}>
-            <div class="field"><label>选择要单独设置的群聊（来自白名单，点击切换）</label>
-              <div class="ac-group-buttons" id="ac-group-buttons"></div></div>
-            <div style="margin-top:6px">
-              <button class="btn btn-small btn-danger" id="tier-group-clear-btn" type="button">清除所选群的单独设置</button>
-            </div>
-          </div>
-      </div>
-      <div class="field" style="display:flex;gap:8px;align-items:center;margin-top:12px">
-        <button class="btn" id="ac-cancel">取消</button>
-        <button class="btn btn-primary" id="ac-save">保存</button>
-        <span class="hint">改动先落在草稿里：「保存」整体提交，「取消」放弃未保存的改动。</span>
+        <div class="hint ac-target" id="ac-target">当前编辑：${esc(scopeText)} · 拖动即自动保存</div>
       </div>`;
   const overlay = root;
 
-  // 「峰谷时段 / 档位参数 / 统一设置」三件套在折叠卡头部（setCard 的 extra 插槽），
-  // 不在编辑器体内 —— 统一从卡头取用（测试桩环境 closest 为 null 时退回体内查找）。
+  // 「峰谷时段 / 档位参数」按钮在折叠卡头部（setCard 的 extra 插槽）。
   const headCard = overlay.closest ? overlay.closest('.setcard') : null;
   const ctrl = (sel) => headCard?.querySelector(sel) || overlay.querySelector(sel);
-  // 「统一设置」开关：开 = 统一全部群（unifiedTier=true），关 = 每个群单独设置。
-  const chkUnified = ctrl('#ac-unifiedtier');
-  const unifiedNow = () => (chkUnified ? chkUnified.checked !== false : unified0);
-  // 峰谷开关在「峰谷时段」组合按钮内部（文本右侧）：勾选状态即草稿状态，
-  // 主滑条的双珠形态据此切换（所见即所得）。
   const chkPeak = ctrl('#ac-peak-enabled');
   const peakOnNow = () => (chkPeak ? chkPeak.checked === true : (state.config?.store?.peakSchedule?.enabled === true));
   const noteEl = overlay.querySelector('#ac-tier-note');
-  const targetEl = overlay.querySelector('#ac-target');
 
-  // ── 横向分段档位滑条（指针/键盘驱动，单/双珠同轨道）──
-  // 值的真正持有者是下面的草稿变量（dContextPos / dPeak / dGroup*），
-  // 滑条只是"把草稿画出来 + 让用户改草稿"的视图。
   const vsl = createTierBar({
     mount: overlay.querySelector('#ac-slider'),
     dual: peakOn0,
-    low: peakOn0 ? dPeak.valleyPos : globalPos,
-    high: dPeak.peakPos,
+    low: peakOn0 ? clampNum(ps.valley?.sliderPos, pos0) : pos0,
+    high: clampNum(ps.peak?.sliderPos, 10),
     onInput: ({ low, high }) => {
-      // 拖动中：读数行 + 头部摘要实时跟手（轻量刷新，不重建任何列表 DOM）
       const peakOn = peakOnNow();
       if (peakOn) {
         syncScale(sliderToTierUI(low).tier, sliderToTierUI(high).tier);
@@ -339,74 +288,24 @@ function mountActiveConfigEditor(root) {
         setNote(descOf(low));
       }
     },
-    onChange: ({ low, high }) => {
-      const unified = unifiedNow();
-      const peakOn = peakOnNow();
-      if (peakOn) {
-        if (unified) { dPeak.peakPos = high; dPeak.valleyPos = low; }
-        else if (activeGid) dGroupPeak[activeGid] = { peak: high, valley: low };
-      } else {
-        if (unified) dContextPos = low;
-        else if (activeGid) dGroupPos[activeGid] = low;
-      }
-      refreshAfterValueChange(peakOn);
-    }
+    onChange: ({ low, high }) => stageFromBar(low, high)
   });
   activeVSlider = vsl;
-  // 弹窗关闭（取消/保存/Esc/点遮罩都走 closeModelModal → overlay.remove()）时
-  // 摘掉 window 级 pointer 监听：观察 overlay 从 DOM 摘除的一瞬。
-  const mo = new MutationObserver(() => {
+  // MutationObserver 在极简环境（无 DOM 的测试 sandbox）里可能不存在
+  const mo = typeof MutationObserver === 'function' ? new MutationObserver(() => {
     if (!overlay.isConnected) {
       if (activeVSlider === vsl) activeVSlider = null;
       vsl?.destroy();
       mo.disconnect();
     }
-  });
-  mo.observe(document.body, { childList: true });
+  }) : null;
+  mo?.observe(document.body, { childList: true });
 
-  const allowGroupIds = () => (c.allow?.groups || []).map(String);
-  // 已不在白名单的群不再显示（2026-09-25 用户反馈：没必要占按钮位）——
-  // 它们的单独设置数据仍保留在草稿/配置里，群重回白名单时自动恢复生效。
-
-  // ── 群按钮列表（只列白名单内的群）──
-  function renderGroupButtons() {
-    const box = overlay.querySelector('#ac-group-buttons');
-    if (!box) return;
-    const ids = allowGroupIds();
-    if (!ids.includes(activeGid)) activeGid = ids[0] || '';   // 编辑目标失效时回退到第一个白名单群
-    box.innerHTML = ids.length
-      ? ids.map((id) => {
-        const title = groupDisplayName(id);
-        const hasOwn = dGroupPos[id] !== undefined || dGroupPeak[id] !== undefined;
-        return `<button type="button" class="ac-group-btn${id === activeGid ? ' active' : ''}" data-gid="${esc(id)}">`
-          + `${esc(title)}${hasOwn ? '<span class="ac-dot" title="该群有单独设置"></span>' : ''}</button>`;
-      }).join('')
-      : '<div class="hint">（白名单为空——先在「白名单」设置里添加群聊，再回来分群设置）</div>';
-  }
-  overlay.querySelector('#ac-group-buttons')?.addEventListener('click', (e) => {
-    const btn = e.target?.closest?.('.ac-group-btn');
-    if (!btn) return;
-    activeGid = String(btn.dataset?.gid || '');
-    renderGroupButtons();
-    syncSliderUI();
-  });
-  overlay.querySelector('#tier-group-clear-btn')?.addEventListener('click', () => {
-    if (!activeGid) return;
-    delete dGroupPos[activeGid];
-    delete dGroupPeak[activeGid];
-    renderGroupButtons();
-    syncSliderUI();
-  });
-
-  // ── 刻度 / 说明 ──
   function syncScale(tier, peakTier) {
     const numEl = overlay.querySelector('#ac-tier-num');
     if (numEl) {
-      numEl.textContent = (peakTier >= 1 && peakTier !== tier)
-        ? `峰 ${peakTier} 档 · 谷 ${tier} 档`
-        : `${tier} 档`;
+      numEl.textContent = (peakTier >= 1 && peakTier !== tier) ? `峰 ${peakTier} 档 · 谷 ${tier} 档` : `${tier} 档`;
     }
-    // 折叠卡头部摘要（设计稿 tierBadge 同款信息）
     const valEl = overlay.closest('.setcard')?.querySelector('.sc-val');
     if (valEl && vsl) {
       const v = vsl.values;
@@ -417,206 +316,136 @@ function mountActiveConfigEditor(root) {
   }
   function setNote(html) { if (noteEl) noteEl.innerHTML = html; }
 
-  /** 当前象限该读哪组值（分群未单独设置 → 跟随全局）。 */
-  function currentTargets() {
-    const unified = unifiedNow();
-    const peakOn = peakOnNow();
-    if (unified) return peakOn ? { hi: dPeak.peakPos, lo: dPeak.valleyPos } : { single: dContextPos };
-    if (peakOn) {
-      const gp = activeGid ? dGroupPeak[activeGid] : null;
-      return gp ? { hi: clampNum(gp.peak, dPeak.peakPos), lo: clampNum(gp.valley, dPeak.valleyPos) } : { hi: dPeak.peakPos, lo: dPeak.valleyPos };
-    }
-    const gp = activeGid ? dGroupPos[activeGid] : undefined;
-    return { single: (gp !== undefined && gp !== null) ? clampNum(gp, dContextPos) : dContextPos };
-  }
-
-  /** 把当前象限的值装回滑条 + 刷新刻度/说明/目标提示（外部装值，不写草稿）。 */
-  function syncSliderUI() {
-    const unified = unifiedNow();
-    const peakOn = peakOnNow();
-    if (targetEl) {
-      targetEl.textContent = unified
-        ? (peakOn ? '当前编辑：全局峰谷双点' : '当前编辑：全局档位')
-        : (activeGid ? `当前编辑：${groupDisplayName(activeGid)}` : '当前编辑：（未选择群）');
-    }
-    if (!vsl) return;
-    const none = !unified && !activeGid;   // 分群模式但白名单为空：滑条只读
-    vsl.setDisabled(none);
-    vsl.setDual(peakOn);
-    const t = currentTargets();
-    if (peakOn) {
-      vsl.setValues(t.lo, t.hi);
-      syncScale(sliderToTierUI(t.lo).tier, sliderToTierUI(t.hi).tier);
-      setNote(`高峰：${descOf(t.hi)}<br>低谷：${descOf(t.lo)}`);
-    } else {
-      vsl.setValues(t.single, t.single);
-      syncScale(sliderToTierUI(t.single).tier, -1);
-      setNote(descOf(t.single));
-    }
-  }
-
-  /** 值变化后的联动刷新（滑条已是新值，只刷刻度/说明/群按钮小圆点）。 */
-  function refreshAfterValueChange(peakOn) {
-    const v = vsl?.values || { low: 0, high: 0 };
-    if (peakOn) {
-      syncScale(sliderToTierUI(v.low).tier, sliderToTierUI(v.high).tier);
-      setNote(`高峰：${descOf(v.high)}<br>低谷：${descOf(v.low)}`);
-    } else {
-      syncScale(sliderToTierUI(v.low).tier, -1);
-      setNote(descOf(v.low));
-    }
-    renderGroupButtons();   // "有单独设置"的小圆点可能变了
-  }
-
-  /** 开关切换：只切显隐 + 重载滑条值，不重建弹窗。animate=false 用于初始装填（不播动画）。 */
-  function applyQuadrantUI(animate = true) {
-    const unified = unifiedNow();
-    const peakOn = peakOnNow();
-    const garea = overlay.querySelector('#ac-group-area');
-    if (garea) {
-      if (unified) uiHide(garea, () => { garea.style.display = 'none'; }, animate);
-      else uiShow(garea, () => { garea.style.display = ''; }, animate);
-    }
-    if (!unified && !activeGid) {
-      const ids = allowGroupIds();
-      activeGid = ids[0] || '';   // 自动选中第一个群，滑条立刻有编辑对象
-    }
-    renderGroupButtons();
-    syncSliderUI();
-  }
-  // 「统一设置」/「峰谷」开关：改动即时反映到滑条形态与显隐
-  chkUnified?.addEventListener('change', () => applyQuadrantUI());
-  chkPeak?.addEventListener('change', () => applyQuadrantUI());
-
-  // 快捷档位预设胶囊已按需求移除（统一全部群开关保留）；
-  // 档位定位由滑条拖动 + 松手吸附（1/2/4 档回中心）承担。
-  // 峰谷预设/自定义保存逻辑已随「峰谷设置」模态框搬入 openPeakModal。
-
-  // 初始装填（刻度/说明/群按钮/滑条值）——不播显隐动画
-  applyQuadrantUI(false);
-
-  // 群名补底：没有消息存档的白名单群在 /api/chats 里查不到名字，按钮会退化成
-  // 「群 <号>」不方便辨识 —— 悄悄拉一次 OneBot 群列表，回来后按群名重画按钮。
-  if (!state.qqGroupNames || !Object.keys(state.qqGroupNames).length) {
-    loadQqGroupNames().then(() => {
-      if (!overlay.isConnected) return;
-      renderGroupButtons();
-      syncSliderUI();
-    });
-  }
-
-  // ── 统一保存：主编辑器与两个模态框共用（extra 携带模态框字段）──
-  // 语义：无论从哪里保存，当前草稿 + extra 一起整体提交 —— 不会出现
-  // "模态框保存把滑条上未保存的拖动丢掉"的割裂。
-  async function saveAll(extra = {}) {
-    const storePatch = { unifiedTier: unifiedNow() };
-    // 峰谷：enabled 来自「峰谷设置」按钮上的开关（extra 可覆盖），
-    // 时段来自「峰谷设置」模态框（extra）或沿用已存配置；两颗珠的位置来自草稿。
-    const psNow = state.config?.store?.peakSchedule || {};
-    const peakEnabled = extra.peakEnabled ?? peakOnNow();
-    const peakStart = extra.peakStart || psNow.peak?.start || dPeak.start;
-    const peakEnd = extra.peakEnd || psNow.peak?.end || dPeak.end;
-    if (peakEnabled) {
-      // 峰谷开：存双点；contextSliderPos 同步写低谷值，保证之后关峰谷不跳档。
-      // valley 只写 sliderPos —— start/end 在"高峰外=低谷"语义下是死字段
-      // （运行端 peakWindowActive 只读 peak.start/end），写假时段只会漂移误导。
-      storePatch.contextSliderPos = dPeak.valleyPos;
+  /** 把滑条当前值写进当前作用域（自动保存）。 */
+  function stageFromBar(low, high) {
+    const now = state.config?.store?.peakSchedule || {};
+    const storePatch = {};
+    if (peakOnNow()) {
+      storePatch.contextSliderPos = clampNum(low, pos0);
       storePatch.peakSchedule = {
-        ...psNow, enabled: true,
-        peak: { start: peakStart, end: peakEnd, sliderPos: dPeak.peakPos },
-        valley: { sliderPos: dPeak.valleyPos }
+        ...now,
+        enabled: true,
+        peak: { start: String(now.peak?.start || '09:00'), end: String(now.peak?.end || '18:00'), sliderPos: clampNum(high, 10) },
+        valley: { sliderPos: clampNum(low, 100) }
       };
     } else {
-      storePatch.contextSliderPos = dContextPos;
-      storePatch.peakSchedule = { ...psNow, enabled: false };
+      storePatch.contextSliderPos = clampNum(low, pos0);
+      storePatch.peakSchedule = { ...now, enabled: false };
     }
-    // 分群两张图整体替换（__ 开头内部键已在装填时剔除，不会写回配置）
-    storePatch.groupSliderPos = { __replace__: dGroupPos };
-    storePatch.groupPeakPos = { __replace__: dGroupPeak };
-    // 各档条数 / 关键词表（来自「档位参数与持续参与」模态框）
-    if (extra.tierParams) Object.assign(storePatch, extra.tierParams);
-    // 指令禁言已独立成「指令禁言」折叠卡（走设置页自动保存），不在这里写盘
-    const patch = {
-      store: storePatch
-    };
-    if (extra.chatActive) {
-      patch.chatActive = { ...(state.config?.chatActive || {}), ...extra.chatActive };
-    }
-    const r = await api('/api/config', { method: 'POST', body: JSON.stringify(patch) });
-    if (r?.config) state.config = r.config;
-    return r;
+    saveAll({ storeOverride: storePatch });
   }
 
-  // ── 峰谷时段模态框（高峰时段 / 预设方案 / 自定义保存）──
-  // 启用开关在主界面「峰谷时段」组合按钮内部（文本右侧），这里只管时段本身。
+  /** 峰谷开关：切换 enabled 并立即刷新滑条形态。 */
+  function applyPeakSwitch(on) {
+    const now = state.config?.store?.peakSchedule || {};
+    const base = sliderToTierUI_tierToSlider(state.config?.store || {});
+    const patch = {
+      store: {
+        peakSchedule: {
+          ...now,
+          enabled: !!on,
+          peak: { start: String(now.peak?.start || '09:00'), end: String(now.peak?.end || '18:00'), sliderPos: clampNum(now.peak?.sliderPos, 10) },
+          valley: { sliderPos: clampNum(now.valley?.sliderPos, base) }
+        }
+      }
+    };
+    if (on) patch.store.contextSliderPos = clampNum(now.valley?.sliderPos, base);
+    saveAll({ storeOverride: patch.store });
+    const lo = clampNum(state.config?.store?.peakSchedule?.valley?.sliderPos, base);
+    const hi = clampNum(state.config?.store?.peakSchedule?.peak?.sliderPos, 10);
+    vsl.setDual(!!on);
+    if (on) {
+      vsl.setValues(lo, hi);
+      syncScale(sliderToTierUI(lo).tier, sliderToTierUI(hi).tier);
+      setNote(`高峰：${descOf(hi)}<br>低谷：${descOf(lo)}`);
+    } else {
+      vsl.setValues(base, base);
+      syncScale(sliderToTierUI(base).tier, -1);
+      setNote(descOf(base));
+    }
+  }
+  chkPeak?.addEventListener('change', () => applyPeakSwitch(chkPeak.checked === true));
+
+  /** 统一保存：slider / 峰谷时段 / 档位参数模态框共用的落点（自动保存）。 */
+  function saveAll(extra = {}) {
+    const psNow = state.config?.store?.peakSchedule || {};
+    const peakEnabled = extra.peakEnabled ?? (psNow.enabled === true);
+    const storePatch = extra.storeOverride ? { ...extra.storeOverride } : {};
+    if (!extra.storeOverride) {
+      if (peakEnabled) {
+        storePatch.contextSliderPos = clampNum(psNow.valley?.sliderPos, 100);
+        storePatch.peakSchedule = {
+          ...psNow,
+          enabled: true,
+          peak: { start: extra.peakStart || psNow.peak?.start || '09:00', end: extra.peakEnd || psNow.peak?.end || '18:00', sliderPos: clampNum(psNow.peak?.sliderPos, 10) },
+          valley: { sliderPos: clampNum(psNow.valley?.sliderPos, 100) }
+        };
+      } else {
+        storePatch.contextSliderPos = sliderToTierUI_tierToSlider(state.config?.store || {});
+        storePatch.peakSchedule = { ...psNow, enabled: false };
+      }
+      if (extra.tierParams) Object.assign(storePatch, extra.tierParams);
+    } else if (extra.tierParams) {
+      storePatch.tierParams = undefined;
+      delete storePatch.tierParams;
+      Object.assign(storePatch, extra.tierParams);
+    }
+    const patch = { store: storePatch };
+    if (extra.chatActive) patch.chatActive = { ...(state.config?.chatActive || {}), ...extra.chatActive };
+    postConfigPatch(patch).then(() => {
+      mountSessionRestoreButton();
+      renderSettings();
+    }).catch((e) => showAppAlert(`保存失败：${e.message}`));
+  }
+
+  // ── 峰谷时段模态框 ──
   function openPeakModal() {
     const psNow = state.config?.store?.peakSchedule || {};
-    const start = String(psNow.peak?.start || dPeak.start);
-    const end = String(psNow.peak?.end || dPeak.end);
+    const start = String(psNow.peak?.start || '09:00');
+    const end = String(psNow.peak?.end || '18:00');
     const sub = modelModalShell({
       head: '峰谷时段',
       body: `
         <div class="field-row">
-            <div class="field"><label>高峰时段（开始 ~ 结束，所有群共享）</label>
+            <div class="field"><label>高峰时段（开始 ~ 结束）</label>
               <div style="display:flex;gap:6px;align-items:center">
                 <input type="time" id="cfg-peak-start" value="${esc(start)}" />
                 <span class="muted">~</span>
                 <input type="time" id="cfg-peak-end" value="${esc(end)}" />
               </div>
-              <div class="hint">时段支持跨零点；高峰之外的时间一律视为低谷（用低谷档位）。启用 / 停用峰谷用「峰谷时段」按钮上的开关。</div></div>
+              <div class="hint">时段支持跨零点；高峰之外的时间一律视为低谷。启用 / 停用用「峰谷时段」按钮上的开关。</div></div>
             <div class="field"><label>预设方案</label>
               <select id="cfg-peak-preset">
                 <option value="">— 选择预设 —</option>
+                <div class="hint" id="peak-preset-hint" style="margin-top:4px">选预设自动填充时段与档位点；「保存当前方案为自定义」后随提交生效。</div>
                 ${peakPresetOptions(psNow).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}
-              </select>
-              <div class="hint" id="peak-preset-hint" style="margin-top:4px">选预设自动填充时段与两个档位点（套用到当前编辑的滑条）。</div></div>
+              </select></div>
           </div>
           <div class="field"><button class="btn btn-small" id="peak-preset-save-btn" type="button">保存当前方案为「自定义」</button></div>`,
       foot: `<button class="btn" id="ac-peak-cancel">取消</button>
              <button class="btn btn-primary" id="ac-peak-save">保存</button>`
     });
-    // 预设套用：写当前在场的滑条（applyPeakPreset 设值后派发 input，联动自动刷新）
     const peakPreset = sub.querySelector('#cfg-peak-preset');
     if (peakPreset) peakPreset.addEventListener('change', () => {
       if (peakPreset.value) applyPeakPreset(peakPreset.value);
       peakPreset.value = '';
     });
-    // 保存「自定义」预设（读当前滑条上的值）
     const peakSaveBtn = sub.querySelector('#peak-preset-save-btn');
-    if (peakSaveBtn) peakSaveBtn.addEventListener('click', async () => {
+    if (peakSaveBtn) peakSaveBtn.addEventListener('click', () => {
       const s = sub.querySelector('#cfg-peak-start')?.value || '09:00';
       const e = sub.querySelector('#cfg-peak-end')?.value || '18:00';
       const v = vsl?.values || { low: 100, high: 10 };
-      const cu = {
-        peak: { start: s, end: e, sliderPos: v.high },
-        // valley 只存 sliderPos（"高峰外=低谷"语义；start/end 无人读）
-        valley: { sliderPos: v.low }
-      };
-      try {
-        const r = await api('/api/config', { method: 'POST', body: JSON.stringify({ store: { peakSchedule: { custom: cu } } }) });
-        if (r?.config) state.config = r.config;
-        const hint = sub.querySelector('#peak-preset-hint');
-        if (hint) hint.textContent = `已保存「自定义」（峰 ${s}~${e} @${cu.peak.sliderPos} / 其余 @${cu.valley.sliderPos}）`;
-      } catch (e2) {
-        alert(`保存自定义失败：${e2.message}`);
-      }
-    });
-    sub.querySelector('#ac-peak-cancel')?.addEventListener('click', () => {
+      const psNext = state.config?.store?.peakSchedule || {};
+      saveAll({ storeOverride: { peakSchedule: { ...psNext, custom: { peak: { start: s, end: e, sliderPos: v.high }, valley: { sliderPos: v.low } } } } });
       closeModelModal(sub);
-      applyQuadrantUI();   // 取消 = 放弃未保存的开关/时段改动，滑条形态回到已存配置
     });
-    sub.querySelector('#ac-peak-save')?.addEventListener('click', async () => {
-      try {
-        // 启用与否读「峰谷设置」按钮上的开关（所见即所得），时段来自本弹窗
-        await saveAll({
-          peakStart: sub.querySelector('#cfg-peak-start')?.value || '09:00',
-          peakEnd: sub.querySelector('#cfg-peak-end')?.value || '18:00'
-        });
-        closeModelModal(sub);
-        loadSettings();
-      } catch (e) {
-        alert(`保存峰谷设置失败：${e.message}`);
-      }
+    sub.querySelector('#ac-peak-cancel')?.addEventListener('click', () => { closeModelModal(sub); renderSettings(); });
+    sub.querySelector('#ac-peak-save')?.addEventListener('click', () => {
+      saveAll({
+        peakStart: sub.querySelector('#cfg-peak-start')?.value || '09:00',
+        peakEnd: sub.querySelector('#cfg-peak-end')?.value || '18:00'
+      });
+      closeModelModal(sub);
     });
   }
 
@@ -624,8 +453,6 @@ function mountActiveConfigEditor(root) {
   function openTierParamsModal() {
     const stNow = state.config?.store || {};
     const cNow = state.config || {};
-    // 2026-09-25 改版：各档条数统一 —— 档位只决定触发方式，历史条数一条配置管全部。
-    // 老配置的 allCount 作为缺省值兜底显示（stripObsoleteFields 已不再写入新字段）。
     const sub = modelModalShell({
       head: '档位参数',
       body: `
@@ -652,8 +479,8 @@ function mountActiveConfigEditor(root) {
     sub.querySelector('#tp-cancel')?.addEventListener('click', () => closeModelModal(sub));
     sub.querySelector('#tp-save')?.addEventListener('click', async () => {
       try {
-        await saveAll({
-          tierParams: {
+        await postConfigPatch({
+          store: {
             historyCount: clampInt(sub.querySelector('#tp-historycount')?.value, 1, 500, 80),
             promptAnchor: {
               enabled: sub.querySelector('#tp-anchor')?.checked === true,
@@ -667,36 +494,25 @@ function mountActiveConfigEditor(root) {
           }
         });
         closeModelModal(sub);
-        loadSettings();
+        mountSessionRestoreButton();
+        renderSettings();
       } catch (e) {
         alert(`保存档位参数失败：${e.message}`);
       }
     });
   }
 
-  // 「峰谷时段」组合按钮：点按钮本体 = 设置高峰时段（弹窗）；
-  // 点文本右侧的开关 = 启用 / 停用峰谷（不弹窗，即时预览主滑条双珠形态）。
-  // stopPropagation：三件套在折叠卡头部，不拦住会顺手把卡折叠了。
   const peakBtn = ctrl('#ac-peak-btn');
   peakBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (e.target?.closest?.('.switch, input')) return;   // 点的是开关，别弹窗
+    if (e.target?.closest?.('.switch, input')) return;
     openPeakModal();
   });
   peakBtn?.addEventListener('keydown', (e) => {
-    if (e.target !== peakBtn) return;   // 开关自身的键盘操作不冒泡成"打开弹窗"
+    if (e.target !== peakBtn) return;
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPeakModal(); }
   });
   ctrl('#ac-tier-params-btn')?.addEventListener('click', openTierParamsModal);
-  overlay.querySelector('#ac-cancel')?.addEventListener('click', () => renderSettings());
-  overlay.querySelector('#ac-save')?.addEventListener('click', async () => {
-    try {
-      await saveAll();
-      loadSettings();
-    } catch (e) {
-      alert(`保存失败：${e.message}`);
-    }
-  });
 }
 
 /**

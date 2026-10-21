@@ -7,6 +7,7 @@
 // 重构说明：所有工具通过 registerTool() 注册到 tool-registry.js，
 // 支持在设置页按卡片勾选启用/禁用。
 import { getConfig } from './config.js';
+import { isChatAdmitted } from './chat-profiles.js';
 import { normalizeMessageList, unquoteJsonString } from './util.js';
 import { formatStickerList } from './stickers.js';
 import { skillManager } from './skills/manager.js';
@@ -229,16 +230,12 @@ function registerAllTools() {
           return err(`目标 ${wantTarget} 就是当前会话，直接用 send_message 即可。`);
         }
         const [tKind, tId] = wantTarget.split(':');
-        const allow = getConfig().allow || {};
-        const allowList = (tKind === 'group' ? allow.groups : allow.private) || [];
-        // 白名单空名单口径必须与消息入口 app.allowed() 一致（群/私聊统一：
-        // 空名单 + allowAllWhenEmpty 才放行）。曾经私聊在这里无条件放行，
-        // 入口拒收私聊、send_to 却能替模型把消息发给任意私聊 QQ —— 同一
-        // 白名单概念两处判定相反。
-        const allowedAll = allowList.length === 0 && getConfig().allowAllWhenEmpty === true;
-        if (!(allowList.map(String).includes(tId) || allowedAll)) {
-          return err(`目标 ${wantTarget} 不在白名单内，不能发送。`);
+        // 准入口径与消息入口一致（deny / acceptAllSessions / chatProfiles），
+        // 曾经"两处白名单判定相反"的老问题不允许复发。
+        if (!isChatAdmitted(wantTarget)) {
+          return err(`目标 ${wantTarget} 未被准入（未添加到会话自定义且未开启"接受所有会话"），不能发送。`);
         }
+        void tKind; void tId;
         const messages = normalizeMessageList(args.messages);
         if (!messages.length) return err('消息内容为空');
         const result = await ctx.sender.sendTextBatch(wantTarget, messages, {});

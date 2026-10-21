@@ -3,9 +3,9 @@
 // ── 记忆视图 ──
 async function loadMemoryView() {
   try {
-    const [cfg, chats] = await Promise.all([api('/api/config'), api('/api/chats')]);
+    const [cfg, chats] = await Promise.all([api('/api/config'), api(withCmScope('/api/chats'))]);
     state.config = cfg;
-    const files = await api('/api/memory-files');
+    const files = await api(withCmScope('/api/memory-files'));
     state.memoryFiles = files.files || [];
     state.chats = chats.chats || [];
     // 用后端状态校正本地记录：覆盖"页面刚刷新""SSE 断连期间状态变化"两种情况。
@@ -41,10 +41,10 @@ function startConsolidateTicker() {
     if (!active.length) {
       clearInterval(consolidateTicker);
       consolidateTicker = null;
-      if (state.tab === 'memory') renderMemoryList();
+      if (inCmSub('memory')) renderMemoryList();
       return;
     }
-    if (state.tab !== 'memory') return;
+    if (!inCmSub('memory')) return;
     // 只更新计时文本，不重建整个详情页（避免打断用户阅读/滚动）
     const key = state.currentMemoryChatKey;
     const el = $('#mem-consolidate-status');
@@ -413,30 +413,58 @@ async function openMemberNoteModal(qq, chatKey) {
   });
 }
 async function loadSettings() {
-  const [cfg, tplData, provData, visionData, priceData, toolsData, skillsData] = await Promise.all([
-    api('/api/config'),
+  // ⚠️ 解构顺序必须与下方数组一致（曾经 config/skills 顺序错位导致设置页崩溃）
+  const [skillsData, tplData, provData, visionData, priceData, toolsData, cfg] = await Promise.all([
+    // 会话作用域下技能列表按该会话生效判定（?chat=）
+    api(`/api/skills${isSessionScope() ? `?chat=${encodeURIComponent(state.settingsScope)}` : ''}`).catch(() => ({ skills: [], summary: {} })),
     api('/api/persona-templates').catch(() => ({ templates: [] })),
     api('/api/providers').catch(() => ({ providers: [] })),
     api('/api/vision/results').catch(() => ({ results: {}, scanning: false })),
     api('/api/model-prices').catch(() => ({ prices: [], current: null })),
     api('/api/tools').catch(() => ({ tools: [] })),
-    // 技能状态由后端判定（loaded/enabled/available/active + reason），
-    // 前端只展示，不自己推断可用性 —— 避免出现第二套口径
-    api('/api/skills').catch(() => ({ skills: [], summary: {} }))
+    api('/api/config').catch(() => ({}))
   ]);
-  state.config = cfg;
+  let effectiveCfg = cfg;
+  // 会话面板：拉取该会话的生效配置 + 覆盖（覆盖项供"恢复默认"与角标展示）
+  if (isSessionScope()) {
+    try {
+      const prof = await api(`/api/chat-profiles/${profileUrl(state.settingsScope)}`);
+      effectiveCfg = prof.effective;
+      state.defaultConfig = prof.default;
+      state.scopeOverrides = prof.overrides || {};
+      state.profileEntry = prof.profile || null;
+      // 会话视角的技能列表也许要重取一次（上面那次按旧 state 计算了，这里纠正）
+      const skillsRes = await api(`/api/skills?chat=${encodeURIComponent(state.settingsScope)}`).catch(() => null);
+      if (skillsRes) {
+        state.skills = skillsRes.skills || [];
+        state.skillsSummary = skillsRes.summary || {};
+        state.uninstalledSkills = skillsRes.uninstalled || [];
+      }
+    } catch { /* 拉不到就退回默认视图数据 */ }
+  } else {
+    state.defaultConfig = null;
+    state.scopeOverrides = {};
+    state.profileEntry = null;
+  }
+  state.config = effectiveCfg;
   state.providers = provData.providers || [];
   state.visionResults = visionData.results || {};
   state.visionScanning = !!visionData.scanning;
   state.modelPrices = priceData || { prices: [], current: null };
   state.personaTemplates = {};
   state.toolRegistry = toolsData.tools || [];
-  state.skills = skillsData.skills || [];
-  state.skillsSummary = skillsData.summary || {};
-  state.uninstalledSkills = skillsData.uninstalled || [];
+  if (!isSessionScope()) {
+    state.skills = skillsData.skills || [];
+    state.skillsSummary = skillsData.summary || {};
+    state.uninstalledSkills = skillsData.uninstalled || [];
+  }
   for (const t of tplData.templates || []) state.personaTemplates[t.id] = { name: t.name, text: t.text, builtin: !!t.builtin };
+  // 左栏会话列表（搜索/置顶状态在这里也是一部分数据）
+  // ⚠️ 必须 await：否则 renderSettings 先跑，左栏拿到空列表渲染出"还没有会话"，
+  //    等 /api/chat-profiles 回来才补行（空窗期点击/断言都会看到 0 行）。
+  await loadChatProfiles({ quiet: true });
   // 提示词预览与配置并行拉取；渲染时可能还没到（先显示占位，到达后原地替换）
-  refreshPromptPreview(cfg);
+  refreshPromptPreview(state.config);
   renderSettings();
 }
 
@@ -785,3 +813,6 @@ function renderHealthCard() {
 }
 
 // 人设模板数据：state.personaTemplates（由 loadSettings 从后端填充）
+
+
+

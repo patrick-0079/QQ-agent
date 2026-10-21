@@ -54,6 +54,8 @@
         <span class="rdot" data-target="settings" title="配置未完成"></span>
       </span>
       <button id="theme-btn" class="icon-btn" title="切换主题（暗 ↔ 亮）" aria-label="切换主题"></button>
+      <!-- 「！？群群？！」二维码彩蛋：从设置侧栏移到顶栏（2026-10-21） -->
+      <button id="qrcode-egg-btn" class="icon-btn" title="！？群群？！" aria-label="！？群群？！">▣</button>
       <button id="pause-btn" class="btn btn-small">暂停</button>
     </div>
   </header>
@@ -70,12 +72,10 @@
   </div>
 
   <nav id="tabs">
-    <button class="tab active" data-tab="sessions">会话</button>
-    <button class="tab" data-tab="chats">存档</button>
-    <button class="tab" data-tab="memory">记忆</button>
+    <button class="tab active" data-tab="chatmanage">会话管理</button>
     <button class="tab" data-tab="usage">用量</button>
-    <button class="tab" data-tab="skills">技能</button>
-    <button class="tab" data-tab="plugins">插件</button>
+    <button class="tab" data-tab="skills">技能仓库</button>
+    <button class="tab" data-tab="plugins">插件仓库</button>
     <button class="tab" data-tab="snowluma">SnowLuma</button>
     <button class="tab" data-tab="settings">设置</button>
     <!-- 社区功能（右侧）：金句上传 / 意见收集。金句勾选模式下「确认金句」出现在最左 -->
@@ -90,49 +90,61 @@
   </nav>
 
   <main id="layout">
-    <!-- 会话视图 -->
-    <section id="view-sessions" class="view active">
-      <aside id="session-list" class="list-pane">
-        <div class="list-head muted"><span id="session-count"></span><button class="list-head-btn" id="session-broadcast-btn" title="给选中的群/私聊批量发送一条消息">群发</button><button class="list-head-btn" id="session-clear-btn" title="清空全部已结束的会话记录（保留运行中/等待中的）">清空</button></div>
-        <div id="session-items"></div>
-        <div id="session-more" class="list-more muted"></div>
-        <div class="list-resizer" id="session-list-resizer" title="拖动调整侧栏宽度"></div>
-      </aside>
-      <div id="session-detail" class="detail-pane">
-        <div class="empty-hint">← 选择左侧会话查看完整过程</div>
+    <!-- 会话管理：左栏会话列表（默认会话 + 已单独配置会话），右栏按子页看
+         运行记录/存档/记忆/用量/设置。会话级配置能力集中在这里，设置页只留全局。 -->
+    <section id="view-chatmanage" class="view active">
+      <aside id="cm-rail" class="settings-sidebar"></aside>
+      <div id="cm-main" class="settings-pane">
+        <div id="cm-subtabs" class="session-tabs session-tabs-cm"></div>
+        <div class="cm-panels">
+          <div class="cm-panel active" data-cm-panel="sessions">
+            <div class="cm-split">
+              <aside id="session-list" class="list-pane">
+                <div class="list-head muted"><span id="session-count"></span><button class="list-head-btn" id="session-broadcast-btn" title="给选中的群/私聊批量发送一条消息">群发</button><button class="list-head-btn" id="session-clear-btn" title="清空全部已结束的会话记录（保留运行中/等待中的）">清空</button></div>
+                <div id="session-items"></div>
+                <div id="session-more" class="list-more muted"></div>
+                <div class="list-resizer" id="session-list-resizer" title="拖动调整侧栏宽度"></div>
+              </aside>
+              <div id="session-detail" class="detail-pane">
+                <div class="empty-hint">← 选择左侧会话查看完整过程</div>
+              </div>
+            </div>
+          </div>
+          <div class="cm-panel" data-cm-panel="chats">
+            <div class="cm-split">
+              <aside id="chat-list" class="list-pane">
+                <div class="list-head muted">消息存档</div>
+                <div id="chat-items"></div>
+                <div class="list-resizer" id="chat-list-resizer" title="拖动调整侧栏宽度"></div>
+              </aside>
+              <div id="chat-detail" class="detail-pane">
+                <div class="empty-hint">← 选择会话查看消息存档</div>
+              </div>
+            </div>
+          </div>
+          <div class="cm-panel" data-cm-panel="memory">
+            <div class="cm-split">
+              <aside id="memory-list" class="list-pane">
+                <div class="list-head muted">记忆</div>
+                <div id="memory-items"></div>
+                <div class="list-resizer" id="memory-list-resizer" title="拖动调整侧栏宽度"></div>
+              </aside>
+              <div id="memory-detail" class="detail-pane">
+                <div class="empty-hint">← 选择会话查看记忆</div>
+              </div>
+            </div>
+          </div>
+          <div class="cm-panel" data-cm-panel="usage">
+            <div id="cm-usage" class="usage-pane"></div>
+          </div>
+          <div class="cm-panel" data-cm-panel="settings">
+            <div id="cm-settings" class="settings-pane-inner"></div>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- 存档视图 -->
-    <section id="view-chats" class="view">
-      <aside id="chat-list" class="list-pane">
-        <div class="list-head muted">消息存档</div>
-        <div id="chat-items"></div>
-        <div class="list-resizer" id="chat-list-resizer" title="拖动调整侧栏宽度"></div>
-      </aside>
-      <div id="chat-detail" class="detail-pane">
-        <div class="empty-hint">← 选择会话查看消息存档</div>
-      </div>
-    </section>
-
-    <!-- SnowLuma 视图 -->
-    <section id="view-snowluma" class="view">
-      <div id="snowluma-page" class="snowluma-pane"></div>
-    </section>
-
-    <!-- 记忆视图 -->
-    <section id="view-memory" class="view">
-      <aside id="memory-list" class="list-pane">
-        <div class="list-head muted">记忆</div>
-        <div id="memory-items"></div>
-        <div class="list-resizer" id="memory-list-resizer" title="拖动调整侧栏宽度"></div>
-      </aside>
-      <div id="memory-detail" class="detail-pane">
-        <div class="empty-hint">← 选择会话查看记忆</div>
-      </div>
-    </section>
-
-    <!-- 用量视图 -->
+    <!-- 用量视图（全局） -->
     <section id="view-usage" class="view">
       <div id="usage-page" class="usage-pane"></div>
     </section>
@@ -149,7 +161,12 @@
       <div id="plugins-page" class="usage-pane"></div>
     </section>
 
-    <!-- 设置视图 -->
+    <!-- SnowLuma 视图 -->
+    <section id="view-snowluma" class="view">
+      <div id="snowluma-page" class="snowluma-pane"></div>
+    </section>
+
+    <!-- 设置视图（全局配置）：会话级配置已搬到「会话管理」 -->
     <section id="view-settings" class="view">
       <aside id="settings-sidebar" class="settings-sidebar"></aside>
       <div id="settings-form" class="settings-pane"></div>
@@ -171,6 +188,8 @@
   <script defer src="/app/09-community.js"></script>
   <script defer src="/app/10-feedback.js"></script>
   <script defer src="/app/12-concept2-ui.js"></script>
+  <script defer src="/app/13-chat-settings.js"></script>
+  <script defer src="/app/14-chat-manage.js"></script>
   <script defer src="/app/11-init.js"></script>
 
   <!-- 阿里云验证码 2.0（意见收集/金句上传共用）：容器常驻；AliyunCaptchaConfig 与

@@ -137,8 +137,8 @@ const ctx = vm.createContext(sandbox);
   // 取出渲染函数并执行
   const sections = [
     'renderSettingsSection', 'renderApiSection', 'renderSearchSection',
-    'renderMemorySettingsSection', 'renderPersonaSection', 'renderAllowSection',
-    'renderChatSection', 'renderDesktopSection', 'renderOnebotSection',
+    'renderMemorySettingsSection', 'renderPersonaSection',
+    'renderChatSection', 'renderSecuritySection', 'renderSystemSection',
     'renderPersonaPicker', 'renderHealthCard', 'renderSkillsPage', 'renderPluginsPage'
   ];
 
@@ -392,55 +392,45 @@ const ctx = vm.createContext(sandbox);
     // （#ac-slider 容器，珠子在运行时由控制器注入 —— body 模板里看不到珠子，
     //  初始形态靠容器上的 data-dual 声明）。
     // 每个象限用 renderAt(pos, patch) 独立注入开关 —— cfg 快照重置保证互不污染。
-    // ① 统一+峰谷关：滑条容器在且声明单珠形态，分群区藏、峰谷字段藏
+    // 2026-10-21 会话个性化改版：编辑器只负责"当前作用域"的一套档位，
+    // 分群/统一开关已删除。断言：
+    //   ① 单珠形态 + 模板里不再有分群/统一开关
+    //   ② 峰谷开启 → 双珠形态（峰珠在场）
+    //   ③ 作用域提示跟随 state.settingsScope（默认设置 / 某个群）
     {
       const html = renderAt(55);
-      const sliderBox = /id="ac-slider"[^>]*data-dual="0"/.test(html);
-      // 峰谷字段 2026-09-24 移入「峰谷设置」模态框（不再出现在编辑器模板里），
-      // 断言相应收敛为：单珠形态 + 分群区隐藏。
-      const groupHidden = /id="ac-group-area"[^>]*style="display:none"/.test(html);
-      const ok = sliderBox && groupHidden;
+      const single = /id="ac-slider"[^>]*data-dual="0"/.test(html);
+      const noLegacy = !/id="ac-group-area"|id="ac-unifiedtier"|id="ac-group-buttons"/.test(html);
+      const ok = single && noLegacy;
       ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '四象限①（统一+峰谷关）：滑条声明单珠形态，分群区隐藏'
-        + (ok ? '' : `  slider=${sliderBox} groupHidden=${groupHidden}`));
+      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '单珠形态，且不再渲染分群/统一开关'
+        + (ok ? '' : `  slider=${single} noLegacy=${noLegacy}`));
     }
-    // ② 分群+峰谷关：分群按钮区显示（同一根滑条切换编辑目标）
-    {
-      const html = renderAt(55, { unifiedTier: false });
-      const groupVisible = /id="ac-group-area"(?!\S*style="display:none)/.test(html);
-      const groupButtons = /id="ac-group-buttons"/.test(html);
-      const sliderBox = /id="ac-slider"[^>]*data-dual="0"/.test(html);
-      const ok = groupVisible && groupButtons && sliderBox;
-      ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '四象限②（分群+峰谷关）：群按钮区显示，共用单珠滑条'
-        + (ok ? '' : `  group=${groupVisible} buttons=${groupButtons} slider=${sliderBox}`));
-    }
-    // ③ 统一+峰谷开：滑条声明双珠形态，峰谷时段字段显示
     {
       const html = renderAt(55, {
-        peakSchedule: { enabled: true, peak: { start: '09:00', end: '18:00', sliderPos: 10 }, valley: { start: '09:00', end: '09:00', sliderPos: 100 } }
+        peakSchedule: { enabled: true, peak: { start: '09:00', end: '18:00', sliderPos: 10 }, valley: { sliderPos: 100 } }
       });
-      const sliderBox = /id="ac-slider"[^>]*data-dual="1"/.test(html);
-      const fieldsVisible = /id="ac-peak-fields"(?!\S*style="display:none)/.test(html);
-      const groupHidden = /id="ac-group-area"[^>]*style="display:none"/.test(html);
-      const ok = sliderBox && groupHidden; // 字段断言已随「峰谷设置」移入模态框而失效，忽略 fieldsVisible
+      const dual = /id="ac-slider"[^>]*data-dual="1"/.test(html);
+      const hasPeakKnob = /knob-peak/.test(html) && !/knob-peak"[^>]*display:none/.test(html);
+      const ok = dual && hasPeakKnob;
       ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '四象限③（统一+峰谷开）：滑条声明双珠形态，时段字段显示'
-        + (ok ? '' : `  slider=${sliderBox} fields=${fieldsVisible} groupHidden=${groupHidden}`));
+      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '峰谷开启 → 双珠形态'
+        + (ok ? '' : `  dual=${dual} peakKnob=${hasPeakKnob}`));
     }
-    // ④ 分群+峰谷开：群按钮区与双珠滑条同场（分群峰谷仍可单独编辑）
     {
-      const html = renderAt(55, {
-        unifiedTier: false,
-        peakSchedule: { enabled: true, peak: { start: '09:00', end: '18:00', sliderPos: 10 }, valley: { start: '09:00', end: '09:00', sliderPos: 100 } }
-      });
-      const groupVisible = /id="ac-group-area"(?!\S*style="display:none)/.test(html);
-      const dualSlider = /id="ac-slider"[^>]*data-dual="1"/.test(html);
-      const fieldsVisible = /id="ac-peak-fields"(?!\S*style="display:none)/.test(html);
-      const ok = groupVisible && dualSlider; // 同上：忽略 fieldsVisible
+      // 默认设置作用域（settingsView=session + scope=default）
+      vm.runInContext("state.settingsView = 'session'; state.settingsScope = 'default'; state.chatSessions = [];", ctx);
+      const globalHtml = renderAt(55);
+      const globalOk = /当前编辑：全局默认档位/.test(globalHtml);
+      // 会话作用域：提示文案带上该群
+      vm.runInContext("state.settingsScope = 'group:123456'; state.chatSessions = [{ key: 'group:123456', kind: 'group', id: '123456', name: '测试群' }];", ctx);
+      const scopedHtml = renderAt(55);
+      const scopedOk = /当前编辑：/.test(scopedHtml) && /(123456|测试群)/.test(scopedHtml);
+      vm.runInContext("state.settingsScope = 'default'; state.chatSessions = [];", ctx);
+      const ok = globalOk && scopedOk;
       ok ? pass++ : fail++;
-      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '四象限④（分群+峰谷开）：群按钮区与双珠滑条同场（分群峰谷可单独编辑）'
-        + (ok ? '' : `  group=${groupVisible} dual=${dualSlider} fields=${fieldsVisible}`));
+      console.log('  ' + (ok ? 'OK   ' : 'FAIL ') + '作用域提示：默认设置 / 指定群各自正确'
+        + (ok ? '' : `  global=${globalOk} scoped=${scopedOk}`));
     }
 
     // （原 modelModalShell 拦截随「活跃设置」模态框取消而移除。）
@@ -652,7 +642,8 @@ const ctx = vm.createContext(sandbox);
   try {
     const detailBox = document.querySelector('#session-detail');
     vm.runInContext(`
-      state.tab = 'sessions';
+      state.tab = 'chatmanage';
+      state.cmSub = 'sessions';
       state.currentSessionId = 's_sse_1';
       state.sessionDetail = { id: 's_sse_1', chatKey: 'group:1', status: 'running', startedAt: 1,
         messages: [], sent: [], usage: { calls: 0 }, rounds: 0 };
@@ -788,3 +779,4 @@ console.log('\n=== 应用内 alert 弹窗 ===');
 
 console.log('\n' + (fail ? 'FAILED ' + fail + ' / passed ' + pass : 'ALL PASSED ' + pass));
 process.exit(fail ? 1 : 0);
+

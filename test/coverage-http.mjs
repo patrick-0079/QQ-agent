@@ -634,13 +634,14 @@ c.section('7. 会话 / 存档 / 记忆');
     assert.equal(r.status, 400);
   });
 
-  await c.check('POST /api/chats/:key/test-send：白名单外的会话被拒绝（403，不真发消息）', async () => {
+  await c.check('POST /api/chats/:key/test-send：未被准入的会话被拒绝（403，不真发消息）', async () => {
     const before = onebotHttp.state.sends.length;
-    // 白名单只有 456/777，999 不在名单内（allowAllWhenEmpty=false）
+    // 准入口径（2026-10-21）：deny 优先；acceptAllSessions 或已添加到会话自定义（chatProfiles）。
+    // 本测试环境只准入 456/777，999 未添加且未开"接受所有会话"。
     const r = await hit('POST', '/api/chats/group_999/test-send', { body: { text: '不该发出去' } });
     assert.equal(r.status, 403, `应 403，实际 ${r.status}`);
-    assert.ok(r.data.error && r.data.error.includes('白名单'), '错误信息应说明白名单拦截');
-    assert.equal(onebotHttp.state.sends.length, before, '白名单外的目标绝不能真发消息');
+    assert.ok(r.data.error && (r.data.error.includes('白名单') || r.data.error.includes('准入')), '错误信息应说明准入拦截');
+    assert.equal(onebotHttp.state.sends.length, before, '未准入的目标绝不能真发消息');
   });
 
   await c.check('POST /api/chats/:key/delete-messages：按 id 删除消息', async () => {
@@ -748,7 +749,16 @@ c.section('10. 进程管理（安全分支）');
     assert.ok(Array.isArray(r.data.logs));
   });
 
-  await c.check('POST /api/qq-portable/launch：未安装时返回 400 且不 spawn', async () => {
+  await c.check('POST /api/qq-portable/launch：未安装返回 400；已安装只校验接口契约', async () => {
+    // 2026-10-21：本机装了便携 QQ 后"未安装"断言不再成立；
+    // 已安装时绝不 spawn（会弹真实登录窗），只验证状态接口自洽。
+    const portableQqReady = fs.existsSync(path.join(ROOT, 'runtime', 'qq-portable', 'QQ.exe'));
+    if (portableQqReady) {
+      const st = await hit('GET', '/api/qq-portable/status');
+      assert.equal(st.data.ready, true, '已安装时 ready 应为 true');
+      assert.equal(typeof st.data.running, 'boolean');
+      return;
+    }
     const r = await hit('POST', '/api/qq-portable/launch');
     assert.equal(r.status, 400, `未安装应 400，实际 ${r.status}`);
     assert.equal(r.data.ok, false);
@@ -1058,6 +1068,177 @@ c.section('13. 安全回归');
     },
     '已知：readBody 超限时直接 throw，未做请求体排空与 413 转换'
   );
+}
+
+// ── 13.5 会话个性化（chatProfiles）────────────────────────────────────
+// 契约：把会话添加到自定义 = 准入；覆盖里全局专属字段被拒绝；分区恢复默认。
+c.section('13.5 会话个性化');
+{
+  await c.check('GET /api/chat-profiles：列表带准入/统计字段', async () => {
+    const r = await hit('GET', '/api/chat-profiles');
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.data.sessions));
+    const g = r.data.sessions.find((x) => x.key === 'group:456');
+    assert.ok(g, 'group:456 有存档应出现在列表');
+    for (const k of ['key', 'kind', 'hasProfile', 'admitted', 'overrideCount', 'messageCount', 'unread']) {
+      assert.ok(k in g, `会话行缺少字段 ${k}`);
+    }
+    assert.equal(typeof r.data.acceptAllSessions, 'boolean');
+  });
+
+  await c.check('POST /api/chat-profiles：添加即准入；GET 单条可读回', async () => {
+    const created = await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '778899', alias: '覆盖测试群' } });
+    assert.equal(created.status, 200, `新增应 200，实际 ${created.status}`);
+    assert.equal(created.data.profile.alias, '覆盖测试群');
+    const one = await hit('GET', '/api/chat-profiles/group:778899');
+    assert.equal(one.status, 200);
+    assert.equal(one.data.admitted, true, '添加到自定义即准入');
+    assert.ok(one.data.default, '应带默认配置');
+    assert.ok(one.data.effective, '应带生效配置');
+  });
+
+  await c.check('PATCH /api/chat-profiles/:key：改别名/置顶', async () => {
+    const r = await hit('PATCH', '/api/chat-profiles/group:778899', { body: { pinnedAt: Date.now() } });
+    assert.equal(r.status, 200);
+    assert.ok(r.data.profile.pinnedAt > 0);
+    const list = await hit('GET', '/api/chat-profiles');
+    const row = list.data.sessions.find((x) => x.key === 'group:778899');
+    assert.ok(row && row.pinnedAt > 0, '列表应反映置顶');
+  });
+
+  await c.check('PUT /api/chat-profiles/:key/overrides：局部覆盖生效；全局专属被剥掉', async () => {
+    const put = await hit('PUT', '/api/chat-profiles/group:778899/overrides', {
+      body: {
+        overrides: {
+          persona: { roleText: '本群专属人设' },
+          store: { contextSliderPos: 100 },
+          api: { model: 'hijack-attempt' },
+          snowluma: { wsUrl: 'ws://evil' }
+        }
+      }
+    });
+    assert.equal(put.status, 200, `写覆盖应 200，实际 ${put.status}`);
+    const one = await hit('GET', '/api/chat-profiles/group:778899');
+    assert.equal(one.data.effective.persona.roleText, '本群专属人设', '会话覆盖的人设应生效');
+    assert.equal(one.data.effective.store.contextSliderPos, 100);
+    assert.notEqual(one.data.effective.api.model, 'hijack-attempt', '模型 API 全局专属，不可被覆盖');
+    assert.notEqual(one.data.effective.snowluma.wsUrl, 'ws://evil', 'SnowLuma 全局专属，不可被覆盖');
+    const globalOne = await hit('GET', '/api/config?chat=global');
+    void globalOne;
+    const g = await hit('GET', '/api/config');
+    assert.notEqual(g.data.api.model, 'hijack-attempt', '默认配置未被污染');
+  });
+
+  await c.check('GET /api/config?chat=：返回该会话生效配置；非法 chat 400', async () => {
+    const ok = await hit('GET', '/api/config?chat=group:778899');
+    assert.equal(ok.status, 200);
+    assert.equal(ok.data.persona?.roleText, '本群专属人设');
+    const bad = await hit('GET', '/api/config?chat=bogus');
+    assert.equal(bad.status, 400, `非法 chat 应 400，实际 ${bad.status}`);
+  });
+
+  await c.check('DELETE overrides/:section：恢复该分区默认；DELETE 会话：不再准入', async () => {
+    const del = await hit('DELETE', '/api/chat-profiles/group:778899/overrides/persona');
+    assert.equal(del.status, 200, `恢复默认应 200，实际 ${del.status}`);
+    const one = await hit('GET', '/api/chat-profiles/group:778899');
+    assert.equal(one.data.effective.persona.roleText, one.data.default.persona.roleText, '人设已回到默认');
+    const rm = await hit('DELETE', '/api/chat-profiles/group:778899');
+    assert.equal(rm.status, 200);
+    assert.equal(rm.data.removed, true);
+    assert.equal(rm.data.admitted, false, '移除后不再准入');
+  });
+}
+
+// ── 13.6 黑名单优先级 + 默认会话口径 ─────────────────────────────────
+c.section('13.6 黑名单优先级 / 默认会话口径');
+{
+  await c.check('黑名单优先级最高：已添加到会话 + 已开接受所有会话，黑名单仍拒绝', async () => {
+    const add = await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '999', alias: '黑名单群' } });
+    assert.equal(add.status, 200, `添加会话应 200，实际 ${add.status}`);
+    const cfg = await hit('GET', '/api/config');
+    const oldDeny = cfg.data.deny || { groups: [], private: [] };
+    const oldAccept = cfg.data.acceptAllSessions === true;
+    try {
+      // 同时打开"接受所有会话"：黑名单仍必须优先拒绝
+      await hit('POST', '/api/config', { body: { acceptAllSessions: true, deny: { groups: ['999'], private: [] } } });
+      const before = onebotHttp.state.sends.length;
+      const r = await hit('POST', '/api/chats/group_999/test-send', { body: { text: '黑名单不该发出去' } });
+      assert.equal(r.status, 403, `黑名单会话应 403，实际 ${r.status}`);
+      assert.ok(String(r.data.error || '').includes('黑名单'), `错误信息应点明黑名单：${r.data.error}`);
+      assert.equal(onebotHttp.state.sends.length, before, '黑名单目标绝不能真发消息');
+      // 非黑名单会话在 acceptAll 下应放行（证明拒绝来自黑名单而不是别的原因）
+      const ok = await hit('POST', '/api/chats/group_789/test-send', { body: { text: '普通群应放行' } });
+      assert.equal(ok.status, 200, `acceptAll 下普通群应放行，实际 ${ok.status}`);
+    } finally {
+      await hit('POST', '/api/config', { body: { acceptAllSessions: oldAccept, deny: oldDeny } });
+      await hit('DELETE', '/api/chat-profiles/group:999');
+    }
+  });
+
+  await c.check('默认会话口径：/api/chats?chat=default 不含已单独添加的会话', async () => {
+    await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '456', alias: '默认口径测试群' } });
+    try {
+      const def = await hit('GET', '/api/chats?chat=default');
+      assert.equal(def.status, 200);
+      assert.ok(Array.isArray(def.data.chats));
+      assert.ok(!def.data.chats.some((c) => c.key === 'group:456'), '已单独添加的会话不应计入默认会话');
+      const own = await hit('GET', '/api/chats?chat=group%3A456');
+      assert.ok(own.data.chats.some((c) => c.key === 'group:456'), '会话自己的口径应只看到自己');
+      assert.ok(own.data.chats.every((c) => c.key === 'group:456'), '会话口径不应混入别的会话');
+    } finally {
+      await hit('DELETE', '/api/chat-profiles/group:456');
+    }
+  });
+
+  await c.check('默认会话口径：/api/sessions?chat=default 与 /api/memory-files 同步过滤', async () => {
+    await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '456' } });
+    try {
+      const s = await hit('GET', '/api/sessions?chat=default');
+      assert.equal(s.status, 200);
+      assert.ok(Array.isArray(s.data.sessions));
+      assert.ok(!s.data.sessions.some((x) => x.chatKey === 'group:456'), '默认会话运行记录不应包含已单独添加会话');
+      const m = await hit('GET', '/api/memory-files?chat=default');
+      assert.equal(m.status, 200);
+      assert.ok(!m.data.files.some((f) => f.chatKey === 'group:456'), '默认会话记忆不应包含已单独添加会话');
+    } finally {
+      await hit('DELETE', '/api/chat-profiles/group:456');
+    }
+  });
+
+  await c.check('PUT overrides：skills 可按会话覆盖（文件全局一份，启停按会话）', async () => {
+    await hit('POST', '/api/chat-profiles', { body: { kind: 'group', id: '654321' } });
+    try {
+      const put = await hit('PUT', '/api/chat-profiles/group:654321/overrides', {
+        body: { overrides: { skills: { 'demo-skill': { enabled: true } }, tools: { overrides: { web_search: false } } } }
+      });
+      assert.equal(put.status, 200);
+      const one = await hit('GET', '/api/chat-profiles/group:654321');
+      assert.equal(one.data.overrides.skills['demo-skill'].enabled, true, '会话级技能开关应写进 profile');
+      assert.equal(one.data.overrides.tools.overrides.web_search, false, '会话级工具开关应写进 profile');
+      const reset = await hit('DELETE', '/api/chat-profiles/group:654321/overrides/skills');
+      assert.equal(reset.status, 200);
+      const after = await hit('GET', '/api/chat-profiles/group:654321');
+      assert.ok(!after.data.overrides.skills, '恢复默认应删掉该分区的会话覆盖');
+    } finally {
+      await hit('DELETE', '/api/chat-profiles/group:654321');
+    }
+  });
+
+  await c.check('会话用量：/api/usage/stats?chat=default 与 chat=<key> 都可用且口径不同', async () => {
+    const all = await hit('GET', '/api/usage/stats?range=7');
+    const def = await hit('GET', '/api/usage/stats?range=7&chat=default');
+    const one = await hit('GET', '/api/usage/stats?range=7&chat=group%3A456');
+    assert.equal(def.status, 200);
+    assert.equal(one.status, 200);
+    assert.ok(def.data.totals && typeof def.data.totals.cost === 'number');
+    assert.ok(Array.isArray(def.data.chats));
+    assert.ok(!def.data.chats.some((g) => g.key === 'group:456'),
+      '默认会话用量不应包含已单独配置的会话');
+    assert.ok(one.data.chats.every((g) => g.key === 'group:456') || one.data.chats.length === 0,
+      '会话用量只应包含该会话');
+    assert.equal(def.data.chat, 'default');
+    assert.equal(all.data.chat, null);
+  });
 }
 
 // ── 14. 破坏性接口（放这里：会清空数据目录，必须在所有只读断言之后） ─────

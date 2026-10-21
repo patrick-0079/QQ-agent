@@ -532,9 +532,15 @@ function openModelConfigModal() {
 
 /** 选择模型：左提供商 / 右模型，点击模型后保存到当前 api 配置并关闭。 */
 function openModelPicker() {
+  // 自愈：入口卡片不在场（被别的分区顶掉）时，先把它放回来
+  if (!$('#provider-hint')) {
+    state.settingsView = 'global';
+    state.settingsSection = 'api';
+    renderSettings();
+  }
   const providers = state.providers || [];
   if (!providers.length) {
-    $('#provider-hint').textContent = '模型目录为空：请先在下方的“手动添加提供商”里添加。';
+    $('#provider-hint').textContent = '模型目录为空：请先在提供商目录里添加。';
     return;
   }
   const overlay = modelModalShell({
@@ -608,9 +614,16 @@ function openModelPicker() {
 
 /** 选择记忆整理专用模型：复用模型目录选择器，保存到 config.memory.provider/model。 */
 function openMemoryModelPicker() {
+  // 自愈：记忆分区不在场（默认设置面板被别的分区顶掉）时，先放回来
+  if (!$('#mem-model-hint')) {
+    state.settingsView = 'session';
+    state.settingsScope = 'default';
+    state.sessionSection = 'memory';
+    renderSettings();
+  }
   const providers = state.providers || [];
   if (!providers.length) {
-    $('#mem-model-hint').textContent = '模型目录为空：请先到「模型 API」页签添加提供商。';
+    $('#mem-model-hint').textContent = '模型目录为空：请先到「模型 API」添加提供商。';
     return;
   }
   const overlay = modelModalShell({
@@ -1147,75 +1160,39 @@ function openProviderAddModal(onDone) {
   return overlay;
 }
 
-// ── 白名单可视化选择器 ──
-async function openWhitelistPicker(kind) {
-  const isGroups = kind === 'groups';
-  $('#pick-result').textContent = '拉取中…';
-  let list;
-  try {
-    const data = await api(`/api/onebot/${kind}`);
-    list = isGroups ? data.groups : data.friends;
-  } catch (e) {
-    $('#pick-result').textContent = `拉取失败：${e.message}（OneBot 未连接？）`;
-    return;
-  }
-  if (!list?.length) {
-    $('#pick-result').textContent = isGroups ? '没拉到群列表（检查 SnowLuma）' : '没拉到好友列表';
-    return;
-  }
-  // 群名进补底缓存：分群按钮等处只显示群名，靠这份名字辨识
-  if (isGroups) {
-    state.qqGroupNames = state.qqGroupNames || {};
-    for (const g of list) {
-      const id = String(g?.id ?? '').trim();
-      const name = String(g?.name ?? '').trim();
-      if (id && name) state.qqGroupNames[id] = name;
-    }
-  }
-  const inputEl = $(isGroups ? '#cfg-allowgroups' : '#cfg-allowprivate');
-  const selected = new Set(parseList(inputEl.value));
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  const close = () => closeAnimatedOverlay(overlay);
-  overlay.innerHTML = `
-    <div class="modal">
-      <div class="modal-head">选择${isGroups ? '群' : '好友'}（已选 ${selected.size} 个）</div>
-      <div class="modal-list">
-        ${list.map((g) => `
-          <label class="pick-item">
-            <input type="checkbox" value="${esc(g.id)}" ${selected.has(g.id) ? 'checked' : ''} />
-            <span>${esc(g.name)}</span>
-            <span class="muted">${esc(g.id)}</span>
-          </label>`).join('')}
-      </div>
-      <div class="modal-foot">
-        <button class="btn btn-primary" id="pick-apply">确定</button>
-        <button class="btn" id="pick-cancel">取消</button>
-      </div>
-    </div>`;
-  // ⚠️ 必须挂到 DOM：曾经漏了这一步 —— 弹窗建好、监听也绑了，但从未进入文档，
-  // 表现就是「点选择群 / 选择好友毫无反应」（2026-09-26 白名单拉取全链路测试抓出）。
-  document.body.appendChild(overlay);
-  $('#pick-cancel', overlay).addEventListener('click', close);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-  // 勾选变化时实时刷新头部计数（打开时显示的只是当时的预选数）
-  overlay.addEventListener('change', (e) => {
-    if (e.target && e.target.matches && e.target.matches('input[type=checkbox]')) {
-      overlay.querySelector('.modal-head').textContent =
-        `选择${isGroups ? '群' : '好友'}（已选 ${$$('input[type=checkbox]:checked', overlay).length} 个）`;
-    }
-  });
-  $('#pick-apply', overlay).addEventListener('click', () => {
-    const picked = $$('input[type=checkbox]:checked', overlay).map((el) => el.value);
-    inputEl.value = picked.join(',');
-    $('#pick-result').textContent = `已选 ${picked.length} 个${isGroups ? '群' : '好友'}，记得点"保存设置"`;
-    close();
-  });
-}
-
 function parseList(s) {
   return String(s || '').split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * 通用「设置写入」：默认作用域 → POST /api/config；会话作用域 → PUT 覆盖。
+ * 供 saveConfig、活跃设置滑条（09）、屏蔽名单（10）等所有写路径共用，
+ * 保证"全局写全局、会话写会话"只有一条实现。
+ */
+async function postConfigPatch(patch, { quiet = true } = {}) {
+  if (state.settingsView === 'session' && state.settingsScope && state.settingsScope !== 'default') {
+    const key = state.settingsScope;
+    const data = await api(`/api/chat-profiles/${profileUrl(key)}/overrides`, {
+      method: 'PUT',
+      body: JSON.stringify({ overrides: patch })
+    });
+    state.config = data.effective || state.config;
+    state.scopeOverrides = data.overrides || state.scopeOverrides;
+    state.profileEntry = data.profile || state.profileEntry;
+    await loadChatProfiles({ quiet: true });
+    if (typeof mountSessionRestoreButton === 'function') mountSessionRestoreButton();
+    return data;
+  }
+  const bodyStr = JSON.stringify(patch);
+  const useKeepalive = bodyStr.length < 60_000;
+  const data = await api('/api/config', {
+    method: 'POST',
+    body: bodyStr,
+    ...(useKeepalive ? { keepalive: true } : {})
+  });
+  state.config = data.config;
+  if (!quiet) $('#model-label').textContent = `模型：${state.config.api?.model || '未设置'}`;
+  return data;
 }
 
 async function saveConfig({ quiet = false } = {}) {
@@ -1258,7 +1235,7 @@ async function saveConfig({ quiet = false } = {}) {
       // 不再渲染 —— 读不到就回写旧值，看似保存实则死写点（openSpecialModelPicker
       // 及其注释宣称的"表单自动保存链"是改版残骸，已一并删除）。
       // 成本核算：官方价开关（走中转站时通常要关掉开关自己填）
-      useOfficialPrice: chk('#cfg-useofficialprice', c.api.useOfficialPrice !== false),
+      useOfficialPrice: chk('#cfg-useofficialprice', c.api?.useOfficialPrice !== false),
       // 远程价格表 URL：留空 = 只用内置表
       // 全局兜底单价：仅当没有模型级价格时生效
       priceInputPerM: Number(val('#cfg-price-in', c.api.priceInputPerM ?? 0)) || 0,
@@ -1270,7 +1247,7 @@ async function saveConfig({ quiet = false } = {}) {
       // （deepMerge 下不写就保留服务端旧值，写了就与隐藏字段一致，两个方向都安全。）
       model: val('#cfg-model', c.api.model || '').trim(),
       provider: val('#cfg-provider', c.api.provider || '').trim(),
-      baseUrl: val('#cfg-baseurl-value', c.api.baseUrl || '').trim(),
+      baseUrl: val('#cfg-baseurl-value', c.api?.baseUrl || '').trim(),
       // 备选模型列表：从 DOM 实时读取（fallbackRows 是 bindSettingsEvents 的局部变量，
       // 顶层 saveConfig 访问不到，所以这里直接查 DOM），过滤掉空行。
       // 提供商列已删：model 输入框显示"提供商名 · 模型id"，但存的是纯 id +
@@ -1362,34 +1339,29 @@ async function saveConfig({ quiet = false } = {}) {
 
   if (sec === 'persona') {
     patch.persona = {
-      botName: val('#cfg-botname', c.persona.botName).trim() || '小鲸鱼',
-      selfNickname: val('#cfg-selfnick', c.persona.selfNickname || '').trim(),
+      // 机器人名字/群内展示名只在「默认设置」可编辑（账号身份，全局生效）
+      ...(chk('#cfg-botname') || chk('#cfg-selfnick') || val('#cfg-botname', '').trim() ? {
+        botName: val('#cfg-botname', c.persona.botName).trim() || '小鲸鱼',
+        selfNickname: val('#cfg-selfnick', c.persona.selfNickname || '').trim()
+      } : { botName: c.persona.botName, selfNickname: c.persona.selfNickname }),
       participation: val('#cfg-participation', c.persona.participation),
       roleText: val('#cfg-roletext', c.persona.roleText || ''),
       customRules: val('#cfg-customrules', c.persona.customRules || ''),
       systemPromptOverride: val('#cfg-sysprompt', c.persona.systemPromptOverride || '')
     };
-    // 统一人设开关：编辑器随开关二选一在场，读不到的保持旧值。
-    patch.personaUnified = chk('#cfg-persona-unified', c.personaUnified !== false);
-    // personaByChat 不在这里收集：独立人设模态框已改为**直接 POST 落盘**（openPerChatPersonaModal
-    // 的 saveToMap），不再走"隐藏 JSON → 表单保存链"——那条链的 change 事件根本到不了 form
-    // 监听器，而且 loadSettings 重建 DOM 会把没保存的值吹掉。这里如果再把（可能过期的）
-    // 隐藏 JSON 值 POST 一遍，会把 modal 刚存的条目用旧值覆盖回去。
-    // ⚠️ 统一开关运行语义（与 personaForChat 一致）：开启 = 一律用全局人设，
-    //    personaByChat 条目不参与合并（数据保留，关掉开关后恢复生效）。
+    // 旧 personaUnified / personaByChat / 统一开关已随 2026-10-21 会话个性化移除。
+    // 「独立人设」的编辑迁移到会话面板（人设分区），保存走会话覆盖链路。
   }
 
-  if (sec === 'allow') {
-    patch.allow = {
-      groups: parseList(val('#cfg-allowgroups', (c.allow?.groups || []).join(','))),
-      private: parseList(val('#cfg-allowprivate', (c.allow?.private || []).join(',')))
-    };
-    // deny 不在这里硬清空：UI 没有 deny 编辑入口（屏蔽走「屏蔽名单」按钮），
-    // 曾经无条件写 patch.deny = { groups: [], private: [] } —— 用户手改 JSON
-    // 加的黑名单在任何一次 allow 区块保存时被抹掉。不写 = deepMerge 保留现值。
-    // 想清空 deny 必须显式走屏蔽名单管理或手改后不再让这里覆盖。
-    const allowAllBox = $('#cfg-allowallwhenempty');
-    patch.allowAllWhenEmpty = allowAllBox ? !!allowAllBox.checked : (c.allowAllWhenEmpty === true);
+  if (sec === 'security') {
+    patch.acceptAllSessions = chk('#cfg-accept-all', c.acceptAllSessions === true);
+    // 黑名单显式收集（deny 可能有无人编辑的旧值；这里整块输出的就是输入框的现值）
+    if ($('#cfg-deny-groups') || $('#cfg-deny-private')) {
+      patch.deny = {
+        groups: parseList(val('#cfg-deny-groups', (c.deny?.groups || []).join(','))),
+        private: parseList(val('#cfg-deny-private', (c.deny?.private || []).join(',')))
+      };
+    }
   }
 
   if (sec === 'chat') {
@@ -1451,7 +1423,8 @@ async function saveConfig({ quiet = false } = {}) {
     };
   }
 
-  if (sec === 'desktop') {
+  if (sec === 'system') {
+    // 原「桌面端」区块的功能保留件，分区改叫「系统与维护」；字段与 id 不变。
     patch.server = {
       ...c.server,
       autoStart: chk('#cfg-autostart', !!c.server?.autoStart),
@@ -1464,7 +1437,7 @@ async function saveConfig({ quiet = false } = {}) {
       showVision: chk('#cfg-showvision', c.ui?.showVision !== false),
       refreshMs: Number(val('#cfg-refreshms', c.ui?.refreshMs ?? 15000)) || 15000
     };
-    // memberNotes 不在这里收集：desktop 区块没有备注编辑入口，把 state.config
+    // memberNotes 不在这里收集：system 区块没有备注编辑入口，把 state.config
     // 里的旧快照整体 POST 一遍是"副本回写"——后端运行时删掉的备注会被旧快照
     // 复活（deepMerge 按键覆盖，删掉的键不会消失）。备注的唯一写入口是
     // 「成员备注」模态框（直接 POST 增量 patch），这里不写 = deepMerge 保留现值。
@@ -1500,15 +1473,12 @@ async function saveConfig({ quiet = false } = {}) {
     return { ok: true, config: state.config };
   }
 
-  // keepalive：页面卸载（关窗/刷新）后请求仍能完成 —— beforeunload 的
-  // 兜底 flush 依赖这一点，普通 fetch 会随页面一起被浏览器中止。
-  // ⚠️ 但 keepalive 有 64KB body 上限，超限时 fetch 直接抛 "Failed to fetch"
-  // （连请求都不发）。设置 patch 多数很小，但关键词表/模型列表/工具 overrides
-  // 可能超 —— 按体积自适应：大 body 退回普通 fetch（卸载兜底本来也只是尽力而为）。
-  const bodyStr = JSON.stringify(patch);
-  const useKeepalive = bodyStr.length < 60_000;
-  const data = await api('/api/config', { method: 'POST', body: bodyStr, ...(useKeepalive ? { keepalive: true } : {}) });
-  state.config = data.config;
-  if (!quiet) $('#model-label').textContent = `模型：${state.config.api.model || '未设置'}`;
+  // keepalive 与会话/默认分流统一在 postConfigPatch 内处理
+  const data = await postConfigPatch(patch, { quiet });
+  // 安全与准入改的是全局黑名单/接受所有会话：会话列表的「🚫 / 走默认」标记
+  // 依赖这两个值，保存后顺手刷新一下左栏（失败不打扰）。
+  if (patch.deny || patch.acceptAllSessions !== undefined) {
+    loadChatProfiles({ quiet: true }).catch(() => {});
+  }
   return data;
 }

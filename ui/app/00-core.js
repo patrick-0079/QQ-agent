@@ -453,7 +453,7 @@ function createVSlider({ mount, dual = false, low = 100, high = 10, onChange = n
 }
 
 const state = {
-  tab: 'sessions',
+  tab: 'chatmanage',
   sessions: [],          // 摘要列表
   currentSessionId: null,
   sessionDetail: null,   // 完整记录
@@ -681,8 +681,8 @@ async function bootLoop() {
   }
   hideLoading();
   refreshStatus();
-  if (state.tab === 'sessions') loadSessions();
-  if (state.tab === 'memory') loadMemoryView();
+  if (inCmSub('sessions')) loadSessions();
+  if (inCmSub('memory')) loadMemoryView();
 }
 
 // ── 就绪度体检（傻瓜式引导的核心） ──
@@ -703,8 +703,12 @@ function assessReadiness(cfg, status) {
     label: modelOk ? `模型已选择：${cfg.api.model}` : '还没有选择模型（填好地址和 Key 后会自动拉取勾选，或在模型管理里手动添加）',
     fix: modelOk ? null : 'settings-api'
   });
-  const allowOk = (cfg.allow?.groups?.length || cfg.allow?.private?.length || cfg.allowAllWhenEmpty);
-  checks.push({ ok: !!allowOk, label: allowOk ? `白名单：${(cfg.allow.groups || []).length} 个群 / ${(cfg.allow.private || []).length} 个好友` : '还没有配置白名单（必填）', fix: allowOk ? null : 'settings-allow' });
+  // 准入就绪（2026-10-21）：接受所有会话 或 至少添加了一个会话（chatProfiles）
+  const admittedCount = Object.keys(cfg.chatProfiles || {}).length;
+  const allowOk = cfg.acceptAllSessions === true || admittedCount > 0;
+  checks.push({ ok: !!allowOk, label: allowOk
+    ? (cfg.acceptAllSessions === true ? '准入：接受所有会话' : `准入：已添加 ${admittedCount} 个会话`)
+    : '还没有可用的会话（到 设置 → 会话列表 添加，或开启"接受所有会话"）', fix: allowOk ? null : 'settings-security' });
   const obOk = status?.onebot?.connected;
     checks.push({ ok: !!obOk, label: obOk ? `OneBot 已连接${status.onebot.self ? `（${status.onebot.self.nickname}）` : ''}` : (status.onebot.diagnosis || 'OneBot（SnowLuma）未连接 —— 请到 SnowLuma 页签启动'), fix: obOk ? null : 'snowluma-tab' });
   return { ready: urlOk && modelOk && allowOk && obOk, checks };
@@ -750,19 +754,21 @@ async function resumePause({ skipBacklog = false } = {}) {
       await api('/api/pause', { method: 'POST', body: JSON.stringify({ paused: false }) });
     }
     await refreshStatus();
-    if (state.tab === 'chats') loadChats({ quiet: true });
+    if (inCmSub('chats')) loadChats({ quiet: true });
   } catch (e) {
     console.error('恢复失败:', e);
   }
 }
 
 function switchTab(name) {
-  // 离开设置页（无论去哪）前，先把防抖窗口内还没落盘的改动立即保存。
+  // 离开设置表单（无论去哪）前，先把防抖窗口内还没落盘的改动立即保存。
   // 必须在页签切换、任何 loadXxx 触发**之前**做：等切走之后表单 DOM 还在
   // （只是视图隐藏）其实也能读，但"正在输入的最后一个字段"可能只过了
   // 防抖窗口的一部分 —— 不 flush 的话这次改动要等 600ms 定时器到点，
   // 期间用户看到的其它页签数据（用量/状态）就是旧配置算出来的。
-  if (state.tab === 'settings' && name !== 'settings') flushSettingsSaves();
+  const leavingSettings = (state.tab === 'settings' && name !== 'settings')
+    || (state.tab === 'chatmanage' && state.cmSub === 'settings' && name !== 'chatmanage');
+  if (leavingSettings) flushSettingsSaves();
   $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   const prevView = $('.view.active');
   $$('.view').forEach((v) => {
@@ -784,20 +790,31 @@ function switchTab(name) {
     prevView.addEventListener('animationend', clear, { once: true });
     setTimeout(clear, 220);
   }
+  // 设置表单只有一个宿主有内容：切到哪个页签就清掉另一个，避免同名 id 冲突
+  // （按 id 取元素只会拿到文档里第一个，隐藏页的旧 DOM 会抢走）。
+  if (name !== 'settings') {
+    const f = $('#settings-form');
+    if (f) f.innerHTML = '';
+  }
+  if (name !== 'chatmanage') {
+    const c = $('#cm-settings');
+    if (c) c.innerHTML = '';
+  }
   state.tab = name;
-  if (state.quoteMode && name !== 'chats') exitQuoteMode();   // 离开存档页自动退出金句勾选
-  if (name === 'sessions') loadSessions();
-  if (name === 'chats') loadChats();
+  if (state.quoteMode && !(name === 'chatmanage' && state.cmSub === 'chats')) exitQuoteMode();
+  if (name === 'chatmanage') enterChatManage();
   // 群名补底：设置页（人设分群按钮/活跃设置分群下拉）用 chatNameOf 取名字，
   // 依赖 state.chats —— 若用户没先进过存档页这里是空的，会只显示群号。
   // 进设置页时悄悄拉一次（quiet，失败不报错），列表已在就跳过。
   if (name === 'settings' && !(state.chats || []).length) {
     api('/api/chats').then((d) => { state.chats = d.chats || []; }).catch(() => {});
   }
-  if (name === 'memory') loadMemoryView();
   if (name === 'usage') loadUsageView({ force: true });
   if (name === 'skills') loadModulePage('skill');
   if (name === 'plugins') loadModulePage('plugin');
   if (name === 'snowluma') loadSnowlumaPage();
-  if (name === 'settings') loadSettings();
+  if (name === 'settings') { state.settingsView = 'global'; loadSettings(); }
 }
+
+
+

@@ -134,9 +134,9 @@ export const providers = {
 
 两个文件即可，放进 `plugins/my-plugin/`，**默认就生效**（热重载默认开着）。
 
-> **在哪看它？** 控制台顶部的 **「插件」页签**（就在「技能」右边）——
+> **在哪看它？** 控制台顶部的 **「插件仓库」页签**（就在「技能仓库」右边）——
 > 那一页列出全部确定性型插件、各自提供的能力、以及"为什么没生效"。
-> 旁边的「技能」页签管的是另一型（LLM 型，`skills/`），两页互不混入。
+> 旁边的「技能仓库」页签管的是另一型（LLM 型，`skills/`），两页互不混入。
 > 这是有意的：判别"这个功能会不会被模型忽略"是使用者最关心的一件事，所以分页展示。
 
 ```bash
@@ -597,3 +597,5 @@ export const hooks = {
 - [snowluma-capabilities.md](./snowluma-capabilities.md) —— 协议端 73 个接口的逐条参数表
 - [skill-system.md](./skill-system.md) —— 架构总览
 - [video-modes.md](./video-modes.md) —— 视频理解两条路的分工与配置（提供 video.frames 类能力前先读）
+
+

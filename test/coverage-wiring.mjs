@@ -153,12 +153,12 @@ const cov = {};
 cov['首屏'] = scan('首屏');
 
 // ── 1) 逐个页签（点真实按钮）────────────────────────────────────────────
-// 注意：8 个 view 都是 index.html 里的静态节点，切页签不会新建元素
+// 注意：各 view 都是 index.html 里的静态节点，切页签不会新建元素
 //（它们在首屏那轮就已全部扫到）。所以这里统计"访问过的页签数"，而不是新增元素数。
 // ⚠️ 这份列表必须与 index.html 里的 .tab 保持一致 —— 漏掉一个页签，
 // 那一页的按钮就永远不会被接线检查覆盖（skills/plugins 曾经就是这样被漏掉的）。
 const visitedTabs = [];
-for (const t of ['sessions', 'chats', 'memory', 'usage', 'skills', 'plugins', 'snowluma', 'settings']) {
+for (const t of ['chatmanage', 'usage', 'skills', 'plugins', 'snowluma', 'settings']) {
   const tabBtn = window.document.querySelector(`.tab[data-tab="${t}"]`);
   if (tabBtn) tabBtn.click(); else { try { window.switchTab(t); } catch { /* ignore */ } }
   await sleep(800);
@@ -182,25 +182,50 @@ await c.check('页签遍历覆盖了 index.html 声明的全部页签', () => {
   return `${declared.length} 个页签全部覆盖`;
 });
 
-// ── 2) 设置页各分区（点侧栏菜单项）────────────────────────────────────────
-const sections = [...window.document.querySelectorAll('.settings-menu-item[data-section]')].map((el) => el.dataset.section);
-for (const sec of sections) {
-  const item = window.document.querySelector(`.settings-menu-item[data-section="${sec}"]`);
-  if (item) item.click(); else continue;
+// ── 2) 会话管理子页（运行记录/存档/记忆/用量/设置）+ 设置页全局分区 ────────
+// 会话级配置在「会话管理 → 设置」；设置页只剩全局分区（[data-gsec]）。
+window.switchTab('chatmanage');
+await sleep(700);
+for (const sub of ['sessions', 'chats', 'memory', 'usage', 'settings']) {
+  window.switchCmSub(sub);
+  await sleep(700);
+  cov[`会话管理/${sub}`] = scan(`会话管理/${sub}`);
+}
+const defItem = window.document.querySelector('#chat-default-item');
+if (defItem) {
+  defItem.click();
+  await sleep(600);
+  const stabs = [...window.document.querySelectorAll('[data-session-section]')].map((el) => el.dataset.sessionSection);
+  for (const tab of stabs) {
+    const btn = window.document.querySelector(`[data-session-section="${tab}"]`);
+    if (!btn) continue;
+    btn.click();
+    await sleep(400);
+    cov[`会话管理/settings-${tab}`] = scan(`会话管理/settings-${tab}`);
+  }
+}
+window.switchTab('settings');
+await sleep(800);
+const gsecs = [...window.document.querySelectorAll('#settings-sidebar [data-gsec]')].map((el) => el.dataset.gsec);
+for (const sec of gsecs) {
+  const item = window.document.querySelector(`#settings-sidebar [data-gsec="${sec}"]`);
+  if (!item) continue;
+  item.click();
   await sleep(500);
-  cov[`设置/${sec}`] = scan(`设置/${sec}`);
+  cov[`设置/global-${sec}`] = scan(`设置/global-${sec}`);
 }
 
 // ── 3) 主要弹窗：直接调用各自的打开函数（比找按钮可靠），逐个扫描 ────────
 // 参数与"前置设置分区"按各函数签名/依赖给：有些函数会先读写本分区的元素
-//（如 openWhitelistPicker 开头就写 #pick-result），分区不对就会抛 null。
+//（如 openModelPicker 写 #provider-hint），分区不对就会抛 null。
+// section: 'api' = 全局分区；'persona' 等 = 默认设置面板里的会话分区标签。
 const MODALS = [
   ['提示弹窗', 'showNoticeModal', ['测试标题', '测试正文'], null],
   ['调用明细', 'openToolBreakdown', [], null],
   ['用量下钻', 'openUsageBreakdown', ['model', 'm0'], null],
   ['人设选择器', 'openPersonaPicker', [], 'persona'],
   ['人设新建', 'openPersonaCreateModal', [], 'persona'],
-  ['全局人设设置', 'openGlobalPersonaModal', [], 'persona'],
+  ['添加会话', 'openAddSessionModal', [], null],
   ['模型选择器', 'openModelPicker', [], 'api'],
   ['记忆模型选择器', 'openMemoryModelPicker', [], 'memory'],
   ['模型添加', 'openModelAddModal', ['https://example.com/v1', 'k', ['m1', 'm2']], 'api'],
@@ -208,19 +233,25 @@ const MODALS = [
   ['模型管理', 'openModelManageModal', [], 'api'],
   ['批量价格编辑', 'openBatchPriceModal', [], 'api'],
   ['屏蔽名单', 'openBlocklistModal', [], 'chat'],
-  ['意见反馈', 'openFeedbackModal', [], null],
-  ['群白名单选择', 'openWhitelistPicker', ['groups'], 'allow'],
-  ['好友白名单选择', 'openWhitelistPicker', ['friends'], 'allow']
+  ['意见反馈', 'openFeedbackModal', [], null]
 ];
 const modalReport = [];
 for (const [name, fn, args, section] of MODALS) {
   for (const ov of [...window.document.querySelectorAll('.model-modal-overlay, .modal-overlay')]) { try { ov.remove(); } catch { /* ignore */ } }
   window.switchTab?.('settings');
-  await sleep(250);
+  // 等第一次 loadSettings 的异步渲染结束，否则它会晚一步覆盖掉我们刚点的面板 DOM
+  await sleep(1400);
   if (section) {
-    const item = window.document.querySelector(`.settings-menu-item[data-section="${section}"]`);
-    if (item) item.click();
-    await sleep(350);
+    if (section === 'api' || section === 'search' || section === 'security' || section === 'system') {
+      const item = window.document.querySelector(`[data-gsec="${section}"]`);
+      if (item) item.click();
+    } else {
+      window.document.querySelector('#chat-default-item')?.click();
+      await sleep(350);
+      const tab = window.document.querySelector(`[data-session-section="${section}"]`);
+      if (tab) tab.click();
+    }
+    await sleep(400);
   }
   let err = '';
   try {
@@ -259,9 +290,11 @@ await c.check('各主要弹窗能正常打开（不算缺陷：无数据时可�
 });
 
 await c.check('扫描覆盖面足够（走完全部页签与设置分区）', () => {
-  const secs = Object.keys(cov).filter((k) => k.startsWith('设置/')).length;
+  // 全局分区（设置/global-*）+ 会话管理子页（会话管理/*）都算设置面覆盖
+  const secs = Object.keys(cov).filter((k) => k.startsWith('设置/') || k.startsWith('会话管理/')).length;
   const modals = Object.keys(cov).filter((k) => k.startsWith('弹窗/') && cov[k] > 0).length;
   if (visitedTabs.length < 6) throw new Error(`只访问了 ${visitedTabs.length} 个页签`);
+  // 全局 4 项 + 默认设置 + 会话分区（最多 4 个）
   if (secs < 6) throw new Error(`只扫到 ${secs} 个设置分区`);
   return `页签 ${visitedTabs.length} / 设置分区 ${secs} / 弹窗 ${modals}，交互元素 ${total} 个`;
 });
@@ -314,3 +347,4 @@ await ctx.teardown();
 try { window.close(); } catch { /* ignore */ }
 try { dom.window.close(); } catch { /* ignore */ }
 process.exit(c.finish() ? 0 : 1);
+

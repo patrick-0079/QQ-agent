@@ -227,7 +227,9 @@ await c.check('landing.html 的下载链接带版本号（官网同目录部署�
   // 2026-09-07 起下载链接刻意改为"带版本号的相对路径"（commit e359c29）：
   // 安装包与落地页同目录部署在官网，相对路径在部署环境有效；
   // "必须绝对地址"的旧断言是按本地服务口径写的，与部署事实相反。
-  const m = /href="([^"]*qq-agent-v[\d.]+-setup\.exe)"/.exec(landing);
+  // 产物名由 package.json 的 build.artifactName 决定（当前：QQ-Agent-V0.4-Preview-Setup.exe），
+  // 断言放宽为"带版本号的同目录 exe"，大小写与 -Preview 段都允许。
+  const m = /href="([^"]*QQ-Agent-V[\d.]+(?:-Preview)?-Setup\.exe)"/i.exec(landing);
   assert.ok(m, '找不到安装包下载链接');
   assert.ok(/^[\w.-]+\.exe$/.test(m[1]), `应为同目录相对文件名（带版本号），实际：${m[1]}`);
 });

@@ -288,11 +288,14 @@ function showCaptcha(cb) {
 // ── 屏蔽名单 ──
 function openBlocklistModal() {
   const cfg = state.config || {};
-  const allowIds = (cfg.allow?.groups || []).map(String);
+  // 准入来源改为 chatProfiles（2026-10-21）：有 profile 且是群的会话出现在左侧
+  const admittedGroups = (state.chatSessions || []).filter((x) => x.kind === 'group').map((x) => x.id);
+  // 兼容当前正在编辑的 blocklist 里的群（旧数据仍有群但没被添加时）也显示出来
+  const allowIds = [...new Set([...admittedGroups, ...Object.keys(cfg.blocklist || {})])];
   if (!allowIds.length) {
     modelModalShell({
       head: '屏蔽名单',
-      body: '<div class="empty-hint">白名单为空——先去「白名单」页签添加群聊，再来屏蔽群员。</div>'
+      body: '<div class="empty-hint">还没有群会话——先在 设置 → 会话列表 里「添加会话」，再来屏蔽群员。</div>'
     });
     return;
   }
@@ -421,12 +424,12 @@ function openBlocklistModal() {
     saveBtn.disabled = true;
     statusEl.textContent = '保存中…';
     try {
-      // 群级屏蔽仍保存在本机；全局名单改走云端共享接口。
-      const localData = await api('/api/config', {
-        method: 'POST',
-        body: JSON.stringify({ blocklist: { __replace__: pending } })
-      });
-      state.config = localData.config;
+      // 群级屏蔽：会话面板里打开 = 写该会话覆盖；默认设置（全局）打开 = 写全局默认。
+      const blocklistPatch = isSessionScope()
+        ? { blocklist: { [String(state.settingsScope).split(':')[1]]: pending[activeGid] } }
+        : { blocklist: { __replace__: pending } };
+      const localData = await postConfigPatch(blocklistPatch);
+      state.config = localData.config ?? localData.effective ?? state.config;
       const cloud = await api('/api/community/blocklist', {
         method: 'POST',
         body: JSON.stringify({ ids: [...pendingGlobal], mode: 'replace' })
@@ -655,19 +658,19 @@ let updateAvailable = false;
 let updateToastDismissed = false;   // 本次启动内用户关过更新浮窗
 
 function renderUpdateDot() {
-  // 侧栏菜单每次重渲染都会重建（菜单 HTML 里已按 updateAvailable 画了点）；
-  // 这里兜底处理"侧栏已渲染完、检测结果刚到"的情况。
-  const item = document.querySelector('.settings-menu-item[data-section="desktop"]');
+  // 2026-10-21：「桌面端」页取消，红点改挂「系统与维护」全局入口。
+  const item = document.querySelector('[data-gsec="system"]');
   if (!item) return;
   let dot = item.querySelector('.update-dot');
   if (updateAvailable && !dot) {
     dot = document.createElement('span');
     dot.className = 'update-dot';
+    dot.title = '发现新版本';
     item.appendChild(dot);
   } else if (!updateAvailable && dot) {
     dot.remove();
   }
-  // 桌面端页签的版本文案同步：有新版时"检查线上是否有新版本"→"发现新版本"
+  // 「系统与维护」分区内的版本文案同步
   const st = document.getElementById('update-status-text');
   if (st) {
     st.innerHTML = updateAvailable ? '<b style="color:var(--orange)">；发现新版本</b>' : '；检查线上是否有新版本';
@@ -715,7 +718,8 @@ function enterQuoteMode() {
   state.quoteMode = true;
   state.quoteSelected = new Set();
   syncQuoteButtons();
-  switchTab('chats');
+  switchTab('chatmanage');
+  if (typeof switchCmSub === 'function' && state.cmSub !== 'chats') switchCmSub('chats');
   if (state.currentChatKey) renderChatMessages();   // 重建出勾选框
 }
 
@@ -724,7 +728,7 @@ function exitQuoteMode() {
   state.quoteMode = false;
   state.quoteSelected = new Set();
   syncQuoteButtons();
-  if (state.tab === 'chats' && state.currentChatKey) updateChatMessagesBody(true);
+  if (inCmSub('chats') && state.currentChatKey) updateChatMessagesBody(true);
 }
 
 /** 勾选模式下的确认：二次确认框 + 昵称。 */
@@ -955,3 +959,5 @@ $('#session-broadcast-btn')?.addEventListener('click', async () => {
     setTimeout(close, 1600);
   });
 });
+
+

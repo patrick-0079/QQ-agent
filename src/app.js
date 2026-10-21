@@ -27,6 +27,8 @@ import { extractCandidateUrls, dispatchMediaLinks } from './media-links.js';
 import { createRoutes } from './routes.js';
 import * as instanceLockModule from './instance-lock.js';
 import { logger } from './logger.js';
+import { setSkillConfig } from './skills/config.js';
+import { isChatAdmitted, isChatAdmittedById, isSkillWantedAnywhere } from './chat-profiles.js';
 import { startCommunitySync, isGloballyBlocked, FIXED_PRICE_FEED_URL } from './community.js';
 
 // 全局 fetch（undici）默认连接建立超时只有 10 秒，openrouter.ai 这类海外端点
@@ -43,15 +45,10 @@ try {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.resolve(__dirname, '..', 'ui');
 
-// ── 白名单判断（移植自原版 allowed()） ───────────────────────────────────
-function allowed(kind, id, cfg) {
-  const s = String(id);
-  const denyList = cfg.deny?.[kind] ?? cfg.deny?.[`${kind}s`] ?? [];
-  if (denyList.map(String).includes(s)) return false;
-  const allowList = cfg.allow?.[kind] ?? cfg.allow?.[`${kind}s`] ?? [];
-  if (allowList.length > 0) return allowList.map(String).includes(s);
-  return cfg.allowAllWhenEmpty === true;
-}
+// ── 准入判断 ─────────────────────────────────────────────────────────────
+// 旧白名单 allowed() 已移除：deny / acceptAllSessions / chatProfiles（会话个性化）
+// 统一收敛在 src/chat-profiles.js 的 isChatAdmitted —— 消息入口、拍一拍、send_to、
+// 测试发送全部用同一份判定，避免"两处白名单口径相反"的老问题复发。
 
 // ── 版本更新检查 ─────────────────────────────────────────────────────
 // 线上版本信息只有一份：kondius.cn/qq-agent/version.json（发版时手动改）。
@@ -822,8 +819,9 @@ export function createApp({ log = console.log } = {}) {
   }
 
   async function ingestMessage(kind, id, event) {
+    // 准入（旧白名单已移除）：deny / acceptAllSessions / chatProfiles 判定，d(data/config.json)
+    if (!isChatAdmittedById(kind, id)) return;
     const cfgNow = getConfig();
-    if (!allowed(kind, id, cfgNow)) return; // 白名单外的聊天完全不记录
 
     const segments = Array.isArray(event.message) ? event.message : null;
     const senderId = String(event.sender?.user_id ?? event.user_id ?? '');
@@ -975,8 +973,8 @@ export function createApp({ log = console.log } = {}) {
   async function ingestPoke(event) {    // OneBot v11: notice_type=notify, sub_type=poke；群拍 target_id，私聊拍自己
     const isGroup = event.group_id != null;
     const id = isGroup ? String(event.group_id) : String(event.user_id);
+    if (!isChatAdmittedById(isGroup ? 'group' : 'private', id)) return;
     const cfgNow = getConfig();
-    if (!allowed(isGroup ? 'group' : 'private', id, cfgNow)) return;
 
     const operatorId = String(event.user_id ?? '');
     // 自己拍的拍（send_poke 的 OneBot 回显）不触发处理——与 message_sent 同理，发送时已留档
@@ -1610,10 +1608,28 @@ export function createApp({ log = console.log } = {}) {
   // 幂等函数，启动流程和手动重扫共用，行为完全一致。
   async function reloadSkills({ reason = 'manual' } = {}) {
     const result = await loadPlugins({ log });
+    // 2026-10-21：**新落地**（磁盘上刚出现、配置里还没有任何记录）的技能/插件
+    // 默认不启用 —— 无论它是从市场装的还是手工放进目录的，都等用户显式打开。
+    const skillsCfgNow = getGlobalConfig()?.skills || {};
     for (const st of skillManager.list()) {
-      if (st.enabled && st.loaded) {
-        try { skillManager.activate(st.id); } catch (error) { log(`[skill] 激活 ${st.id} 失败：${error?.message ?? error}`); }
+      if (!st.loaded) continue;
+      if (!skillsCfgNow[st.id] || skillsCfgNow[st.id]?.enabled === undefined) {
+        try { setSkillConfig(st.id, { enabled: false }); } catch { /* 不阻塞 */ }
+        try { skillManager.deactivate(st.id, { reason: 'installed-default-off' }); } catch { /* ignore */ }
+        if (reason !== 'boot') log(`[skill] ${st.id} 已安装（默认关闭，需手动启用）`);
       }
+    }
+    // 生命周期口径（2026-10-21 会话个性化）：文件只装一份，
+    // activate 条件 = 全局默认启用 或 任一会话 profile 启用；
+    // 启用状态本身按会话生效（isActive 读作用域配置），不再全局一票否决。
+    for (const st of skillManager.list()) {
+      if (!st.loaded) continue;
+      try {
+        const manifest = skillManager.registry.get(st.id)?.manifest;
+        const wanted = isSkillWantedAnywhere(st.id, manifest?.enabledByDefault !== false);
+        if (wanted) skillManager.activate(st.id);
+        else skillManager.deactivate(st.id, { reason: 'not-wanted' });
+      } catch (error) { log(`[skill] 激活 ${st.id} 失败：${error?.message ?? error}`); }
     }
     try { orchestrator.refreshToolDefs(); } catch { /* 刷新失败不影响主流程 */ }
 
@@ -2340,7 +2356,69 @@ function groupBy(rows, field, limit = 0) {
 /** 主统计：按天 / 按会话 / 按模型三个维度。
  * 2026-09-19 起优先走"按日快照"路径（历史日聚合固化在 data/usage-daily.json，
  * 只实时算今天），快照层出错时自动回落到旧的实时聚合 —— 用量页绝不能白屏。 */
-async function buildUsageStats({ range = '7' } = {}) {
+/**
+ * 会话口径的用量统计：把行按 chatKey 过滤后再聚合。
+ *
+ * 为什么不用按日快照：快照是"那天全量"的聚合，没有 chatKey 维度，
+ * 拿去过滤只会得到错数。会话用量是点开某个会话才看的，扫一遍档案可接受。
+ *
+ * @param {{ range?: string, chatKeys?: string[]|null }} opts
+ *        chatKeys=null 表示不筛选；数组（可为空）表示白名单筛选。
+ */
+async function buildUsageStatsSubset({ range = '7', chatKeys = null } = {}) {
+  const { rows, win } = await collectUsageRows({ range });
+  const allow = chatKeys ? new Set(chatKeys.map(String)) : null;
+  const subset = allow ? rows.filter((r) => allow.has(String(r.chatKey ?? ''))) : rows;
+  for (const r of subset) r.dayKey = dayKeyOf(r.at);
+  const totals = costOfRows(subset);
+  const byDayMap = new Map();
+  for (const r of subset) {
+    const k = r.dayKey;
+    if (!byDayMap.has(k)) byDayMap.set(k, []);
+    byDayMap.get(k).push(r);
+  }
+  const byDay = [...byDayMap.entries()]
+    .map(([day, list]) => ({ day, ...costOfRows(list) }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  const todayKey = dayKeyOf(Date.now());
+  const hours = [];
+  for (let h = 0; h < 24; h++) {
+    const hs = new Date(todayKey + 'T00:00:00').getTime() + h * 60 * 60 * 1000;
+    const he = hs + 60 * 60 * 1000 - 1;
+    const ht = costOfRows(subset.filter((r) => r.at >= hs && r.at <= he));
+    hours.push({
+      hour: h, cost: ht.cost, runs: ht.runs,
+      promptTokens: ht.promptTokens, completionTokens: ht.completionTokens,
+      cachedTokens: ht.cachedTokens, cacheHitRate: ht.cacheHitRate, totalTokens: ht.totalTokens
+    });
+  }
+  const chats = groupBy(subset, 'chatKey', 0);
+  const models = groupBy(subset, 'modelKey', 0).map((m) => {
+    const { vendor, model } = splitModelLabel(m.key);
+    return { ...m, vendor, model };
+  });
+  return {
+    range: String(range),
+    rangeLabel: win.label,
+    mode: win.mode,
+    totals,
+    // 搜索/工具是会话级计数，无法按 chatKey 归因 —— 会话口径不下钻，给 0 而不是错数
+    searchCount: 0,
+    toolCounts: {},
+    days: byDay,
+    hours,
+    chats,
+    models
+  };
+}
+
+/**
+ * 主统计入口。
+ * chatKeys=null → 全局用量（按日快照加速）；数组 → 会话口径（按 chatKey 过滤后聚合）。
+ * 「默认会话」的 key 集合由调用方（routes 里的 chat 参数解析）算好传进来。
+ */
+async function buildUsageStats({ range = '7', chatKeys = null } = {}) {
+  if (chatKeys) return buildUsageStatsSubset({ range, chatKeys });
   try {
     const { stats } = await buildUsageStatsWithSnapshots({ range });
     if (stats && stats.totals) return stats;
@@ -2522,3 +2600,5 @@ export function __testUsageDaily() {
     USAGE_DAILY_FILE
   };
 }
+
+

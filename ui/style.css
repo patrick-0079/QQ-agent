@@ -1795,3 +1795,130 @@ details.collapsible.coll-shut > summary::after { transform: rotate(0deg); }
     scroll-behavior: auto !important;
   }
 }
+
+/* ═══ 会话个性化设置（2026-10-21）═════════════════════════════════════ */
+/* 左栏：搜索框 + 会话菜单 + 全局设置入口 */
+.session-search {
+  width: 100%;
+  margin: 8px 0 6px;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+.session-menu {
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 2px;
+}
+.session-empty { padding: 10px 4px; font-size: 12px; }
+#chat-default-item { border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 4px; }
+#chat-default-item .chat-row-icon { color: var(--ac); font-weight: 700; }
+.session-item, .chat-row, .session-add, .global-item { width: 100%; text-align: left; }
+.chat-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 9px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+.chat-row:hover { background: var(--hover, rgba(127,127,127,.08)); }
+.chat-row.active { background: var(--ac-soft, rgba(80,140,255,.12)); border-color: var(--ac-line); }
+.chat-row.admitted { }
+.chat-row.discovered { opacity: .82; }
+.chat-row-main { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; }
+.chat-row-icon { flex: 0 0 auto; }
+.chat-row-text { display: flex; flex-direction: column; min-width: 0; }
+.chat-row-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px; }
+.chat-row-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-def-tag { font-size: 10px; padding: 0 5px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chat-row-ops { display: flex; gap: 2px; }
+.chat-pin-btn { border: 0; background: transparent; cursor: pointer; font-size: 13px; opacity: .35; padding: 2px; border-radius: 6px; }
+.chat-pin-btn:hover { opacity: 1; background: var(--hover, rgba(127,127,127,.12)); }
+.chat-pin-btn.on { opacity: 1; filter: saturate(1.2); }
+.session-add { color: var(--ac); }
+.settings-global-label { margin: 10px 8px 4px; font-size: 11px; letter-spacing: .06em; }
+.global-menu .global-item { border-left: 2px solid transparent; }
+.global-menu .global-item.active { border-left-color: var(--ac); background: var(--ac-soft, rgba(80,140,255,.12)); }
+.global-item { justify-content: flex-start; }
+
+/* 右栏：会话面板（行头 + 分区标签） */
+.session-panel-head { margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2, var(--panel)); }
+.session-panel-title { font-size: 15px; font-weight: 700; }
+.session-panel-sub { font-size: 12px; margin-top: 4px; }
+.session-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.session-tab {
+  border: 1px solid var(--line); border-radius: 999px; background: var(--panel);
+  padding: 5px 14px; font-size: 13px; cursor: pointer;
+}
+.session-tab:hover { border-color: var(--ac-line); }
+.session-tab.active { background: var(--ac-soft, rgba(80,140,255,.14)); border-color: var(--ac-line); color: var(--text); font-weight: 600; }
+.session-tab-op { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.session-panel-body { min-width: 0; }
+#chat-default-item { }
+.chip-scope { display:inline-flex; align-items:center; gap:5px; font-size:11px; border:1px solid var(--ac-line); color: var(--ac); border-radius:999px; padding:1px 8px; }
+.chip-overridden { display:inline-flex; align-items:center; gap:4px; font-size:11px; color: var(--orange); border:1px solid var(--orange); border-radius:999px; padding:1px 8px; }
+
+/* SnowLuma 页连接配置表单 */
+.sl-connect-form { padding: 10px 4px; display: grid; gap: 8px; }
+.sl-connect-form .field-row { display: grid; gap: 8px; }
+
+/* ══ 会话管理（一级菜单）：左会话栏 + 右子页 ══ */
+#view-chatmanage { display: none; }
+#view-chatmanage.active { display: flex; }
+#cm-main {
+  display: flex; flex-direction: column;
+  flex: 1; min-width: 0; min-height: 0;
+  padding: 14px 18px 10px;
+}
+.session-tabs-cm { flex: 0 0 auto; }
+.cm-panels { flex: 1; min-height: 0; position: relative; }
+.cm-panel { display: none; height: 100%; min-height: 0; }
+.cm-panel.active { display: block; }
+.cm-split { display: flex; height: 100%; min-height: 0; }
+.cm-split .list-pane { flex: 0 0 var(--list-w); height: 100%; }
+.cm-panel .list-pane,
+.cm-panel .detail-pane { min-height: 0; }
+#cm-settings { height: 100%; }
+.settings-pane-inner {
+  height: 100%; overflow-y: auto; padding: 4px 4px 40px;
+  overscroll-behavior: contain;
+}
+
+/* 会话管理右栏用量 */
+#cm-usage { padding: 4px 2px 30px; max-width: 900px; }
+.cm-usage-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px; margin: 12px 0 18px;
+}
+.cm-usage-card {
+  background: var(--bg1); border: 1px solid var(--bd); border-radius: var(--r-md);
+  padding: 12px 14px;
+}
+.cm-usage-num { font-size: 20px; font-weight: 700; margin-bottom: 3px; }
+.cm-usage-section {
+  background: var(--bg1); border: 1px solid var(--bd); border-radius: var(--r-md);
+  padding: 10px 14px; margin-bottom: 12px;
+}
+.cm-usage-h { font-size: 13px; font-weight: 600; color: var(--tx2); margin-bottom: 8px; }
+.cm-usage-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 0; border-top: 1px dashed var(--bd); font-size: 13px;
+}
+.cm-usage-row:first-of-type { border-top: none; }
+.cm-usage-key { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-usage-bar {
+  flex: 0 0 120px; height: 6px; border-radius: 3px; background: var(--bg2); overflow: hidden;
+}
+.cm-usage-bar i { display: block; height: 100%; background: var(--ac); border-radius: 3px; }
+.cm-usage-val { flex: 0 0 auto; color: var(--tx2); font-variant-numeric: tabular-nums; }
+
+/* 黑名单会话行 */
+.chat-row.denied .chat-row-name { color: var(--err); }
+.chat-deny-tag { margin-left: 5px; font-size: 11px; }
+
+
+/* 会话级技能/插件开关（会话管理 → 设置 → 工具与技能） */
+.skill-scope-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 8px 0; border-top: 1px dashed var(--bd);
+}
+.skill-scope-row:first-child { border-top: none; }
+.skill-scope-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.skill-scope-name b { font-weight: 600; }
+.skill-scope-name .muted { font-size: 12px; }

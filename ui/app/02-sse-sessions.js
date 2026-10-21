@@ -100,7 +100,7 @@ function connectSSE() {
     }
 
     // 只有停在记忆页时才操作 DOM / 刷新列表
-    if (state.tab !== 'memory') return;
+    if (!inCmSub('memory')) return;
 
     if (phase === 'consolidate-start') {
       const btn = $('#mem-consolidate-btn');
@@ -128,7 +128,13 @@ function connectSSE() {
     refreshStatus();
     if (state.tab === 'snowluma') scheduleSnowlumaReload();
   });
-  es.addEventListener('status', () => refreshStatus());
+  es.addEventListener('status', (ev) => {
+    // 会话列表/准入在其他窗口变化时，本窗口的左栏与面板同步（SSE payload 带 chatProfilesChanged）
+    let d = {};
+    try { d = JSON.parse(ev.data || '{}'); } catch { /* ignore */ }
+    if (d.chatProfilesChanged) loadChatProfiles({ quiet: true });
+    refreshStatus();
+  });
   es.addEventListener('snowluma-status', () => { refreshStatus(); if (state.tab === 'snowluma') scheduleSnowlumaReload(); });
   es.addEventListener('qq-portable-status', () => { refreshStatus(); if (state.tab === 'snowluma') scheduleSnowlumaReload(); });
   // 日志事件只刷日志文本，不整页重建（曾经每条日志都 innerHTML 重绘整页）
@@ -165,7 +171,7 @@ function connectSSE() {
         const v = await api('/api/vision/results');
         state.visionResults = v.results || {};
         state.visionScanning = !!v.scanning;
-        if (state.tab === 'settings') renderSettings();
+        if (settingsTabActive()) renderSettings();
       } catch { /* 拉结果失败就保持现状 */ }
     }
   });
@@ -176,7 +182,7 @@ function connectSSE() {
 async function loadSessions({ quiet = false } = {}) {
   try {
     // 一次全取：后端上限 2^20（约等于不限），前端靠分页渲染（SESSION_PAGE）避免卡顿
-    const data = await api('/api/sessions?limit=1048576');
+    const data = await api(withCmScope('/api/sessions?limit=1048576'));
     state.sessions = data.sessions || [];
     renderSessionList();
     // 自动跟随最新运行中的会话
@@ -226,8 +232,8 @@ function scheduleListReload() {
   if (sseListReloadTimer) return;
   sseListReloadTimer = setTimeout(() => {
     sseListReloadTimer = null;
-    if (state.tab === 'sessions') loadSessions({ quiet: true });
-    if (state.tab === 'chats') loadChats({ quiet: true });
+    if (inCmSub('sessions')) loadSessions({ quiet: true });
+    if (inCmSub('chats')) loadChats({ quiet: true });
   }, 200);
 }
 /**
@@ -326,13 +332,13 @@ function startListPoller() {
     // 页面不可见（最小化/被遮挡）时跳过用量页轮询：大数据下 stats 重算
     // 即便有缓存也要几百毫秒，后台一直跑是纯浪费。会话/存档等轻页签不受影响。
     const skipUsage = document.hidden;
-    if (state.tab === 'sessions' || state.tab === 'chats') scheduleListReload();
+    if (inCmSub('sessions') || inCmSub('chats')) scheduleListReload();
     if (state.tab === 'snowluma') {
       refreshSnowlumaLogs();
       scheduleSnowlumaReload();
     }
     // 用量页不自动刷新：打开/切范围/点「刷新」才请求
-    if (state.tab === 'settings') refreshStatus();
+    if (settingsTabActive()) refreshStatus();
   }, refreshIntervalMs());
 }
 
@@ -504,7 +510,7 @@ async function loadSessionDetail(id, { quiet = false } = {}) {
   try {
     const s = await api(`/api/sessions/${id}`);
     state.sessionDetail = s;
-    if (state.currentSessionId === id && state.tab === 'sessions') renderSessionDetail(s);
+    if (state.currentSessionId === id && inCmSub('sessions')) renderSessionDetail(s);
   } catch (e) {
     if (!quiet) $('#session-detail').innerHTML = `<div class="empty-hint">加载失败：${esc(e.message)}</div>`;
   }
@@ -720,3 +726,7 @@ function renderSessionDetail(s) {
   // 而下面的 4s 主轮询（loadSessions）已经会对 running/waiting 的会话刷新详情，
   // 功能完全覆盖，2s 递归属于纯重复请求。
 }
+
+
+
+

@@ -56,12 +56,16 @@ function scheduleSnowlumaReload(opts = {}) {
 
 async function loadSnowlumaPage({ quiet = false } = {}) {
   try {
-    const [status, logs, qqLogs, appLogsData] = await Promise.all([
+    const [status, logs, qqLogs, appLogsData, cfg0] = await Promise.all([
       api('/api/status'),
       api('/api/snowluma/logs'),
       api('/api/qq-portable/logs'),
-      api('/api/logs?limit=120').catch(() => ({ logs: [], level: 'info' }))
+      api('/api/logs?limit=120').catch(() => ({ logs: [], level: 'info' })),
+      // 连接配置卡片需要全局配置（默认设置）；不覆盖 state.config（其他分区可能更新鲜）
+      api('/api/config').catch(() => ({ snowluma: {} }))
     ]);
+    const connectCfg = cfg0 && typeof cfg0 === 'object' && 'snowluma' in cfg0 ? cfg0 : (state.config || {});
+    void connectCfg;
     const s = status;
     const box = $('#snowluma-page');
     if (!box) return;
@@ -185,6 +189,14 @@ async function loadSnowlumaPage({ quiet = false } = {}) {
         <div class="sl-log-block">
           <div class="hint sl-log-head">运行日志（仅保留最近 500 行）</div>
           <pre class="snowluma-logs-view" id="sl-logs-view">${esc(logText)}</pre>
+        </div>
+
+        <!-- 连接配置（原 设置-OneBot 分区，2026-10-21 搬入此页）：全局字段 -->
+        <div class="sl-log-block" id="snowluma-connect-card">
+          <div class="hint sl-log-head">连接配置（全局 · 改完需重启应用）</div>
+          <div class="sl-connect-form">
+            ${typeof SNOWLUMA_CONNECT_FORM === 'function' ? SNOWLUMA_CONNECT_FORM(connectCfg) : ''}
+          </div>
         </div>
 
         <!-- 应用日志：logger.js 的内存环形缓冲 + data/logs/ 落盘文件。 -->
@@ -355,6 +367,64 @@ async function loadSnowlumaPage({ quiet = false } = {}) {
         $('#sl-hint').textContent = `打开失败：${e.message}`;
       }
     });
+
+    // ── 连接配置（全局）：输入即自动保存；令牌显示/打开目录走原端点 ──
+    const card = $('#snowluma-connect-card');
+    if (card) {
+      let saveTimer = null;
+      const saveConnect = async () => {
+        try {
+          const prev = { view: state.settingsView, sec: state.settingsSection, scope: state.settingsScope };
+          state.settingsView = 'global'; state.settingsSection = 'onebot'; state.settingsScope = 'default';
+          await saveConfig({ quiet: true });
+          state.settingsView = prev.view; state.settingsSection = prev.sec; state.settingsScope = prev.scope;
+          const hint = $('#snowluma-hint');
+          if (hint) hint.textContent = '已保存（连接配置重启后生效）';
+        } catch (e) {
+          const hint = $('#snowluma-hint');
+          if (hint) hint.textContent = `保存失败：${e.message}`;
+        }
+      };
+      const schedule = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveConnect, 700); };
+      ['#cfg-snowlumadir', '#cfg-wsurl', '#cfg-httpurl', '#cfg-snowlumalaunch'].forEach((sel) => {
+        card.querySelector(sel)?.addEventListener('input', schedule);
+        card.querySelector(sel)?.addEventListener('change', schedule);
+      });
+      // 令牌：显示（向后端要明文）/隐藏；输入新明文 → 自动保存
+      let revealed = { ws: false, http: false };
+      const reveal = async (which, inputId, btnId) => {
+        const input = $(inputId);
+        const btn = $(btnId);
+        if (!input || !btn) return;
+        if (revealed[which]) {
+          input.type = 'password';
+          input.value = '******';
+          if (btn) btn.textContent = '显示';
+          revealed[which] = false;
+          return;
+        }
+        try {
+          const r = await api(`/api/onebot-token?which=${which}`);
+          input.type = 'text';
+          input.value = r.token || '';
+          if (btn) btn.textContent = '隐藏';
+          revealed[which] = true;
+        } catch (e) {
+          if (btn) btn.textContent = '显示';
+        }
+      };
+      card.querySelector('#cfg-obtoken-toggle')?.addEventListener('click', () => reveal('ws', '#cfg-obtoken', '#cfg-obtoken-toggle'));
+      card.querySelector('#cfg-obhttptoken-toggle')?.addEventListener('click', () => reveal('http', '#cfg-obhttptoken', '#cfg-obhttptoken-toggle'));
+      ['#cfg-obtoken', '#cfg-obhttptoken'].forEach((sel) => {
+        card.querySelector(sel)?.addEventListener('change', () => { if (revealed[sel === '#cfg-obtoken' ? 'ws' : 'http']) revealed[sel === '#cfg-obtoken' ? 'ws' : 'http'] = false; schedule(); });
+        card.querySelector(sel)?.addEventListener('input', schedule);
+      });
+      card.querySelector('#open-snowluma-btn')?.addEventListener('click', async () => {
+        try { await api('/api/snowluma/open-folder', { method: 'POST', body: '{}' }); }
+        catch (e) { $('#snowluma-hint') && ($('#snowluma-hint').textContent = `失败：${e.message}`); }
+      });
+      // 令牌脱敏占位（隐藏输入框不是掩码时视为未配置）
+    }
   } catch (e) {
     if (!quiet) console.error(e);
   }

@@ -52,7 +52,7 @@ function bindSettingsEvents(c) {
   }
 
   function showUndoBtn() {
-    if (undoBtn || !$('#settings-form')) return;
+    if (undoBtn || !settingsFormRoot()) return;
     undoBtn = document.createElement('button');
     undoBtn.className = 'btn btn-small settings-undo-btn';
     undoBtn.textContent = '↩ 撤销本次设置';
@@ -73,7 +73,7 @@ function bindSettingsEvents(c) {
         alert(`撤销失败：${e.message}`);
       }
     });
-    const form = $('#settings-form');
+    const form = settingsFormRoot();
     if (form) form.prepend(undoBtn);
   }
 
@@ -127,7 +127,7 @@ function bindSettingsEvents(c) {
   //    （N 个并发 POST），关页时 N 次 keepalive 请求可能撞配额。
   //    这里仿照 attachScrollLoader 的做法：监听器只挂一次，闭包引用存在
   //    元素属性上，重渲染时只更新引用。
-  const form = $('#settings-form');
+  const form = settingsFormRoot();
   if (form && !form.__settingsBound) {
     form.__settingsBound = {
       markDirty: (el) => markDirty(el),
@@ -169,14 +169,22 @@ function bindSettingsEvents(c) {
       const id = cb.dataset.skillId;
       cb.disabled = true;
       try {
+        // 会话作用域下开关写进该会话的 profile（覆盖）；默认/技能页写全局默认
+        const body = { enabled: cb.checked };
+        if (isSessionScope()) body.chat = state.settingsScope;
         const r = await api(`/api/skills/${encodeURIComponent(id)}`, {
           method: 'POST',
-          body: JSON.stringify({ enabled: cb.checked })
+          body: JSON.stringify(body)
         });
         // 用后端返回的状态覆盖本地，保证展示与判定一致
         const idx = (state.skills || []).findIndex((s) => s.id === id);
         if (idx >= 0 && r.skill) state.skills[idx] = r.skill;
         if (r.config) state.config = r.config;
+        if (isSessionScope()) {
+          state.scopeOverrides = getProfile(state.settingsScope)?.overrides || state.scopeOverrides;
+          await loadChatProfiles({ quiet: true });
+          mountSessionRestoreButton();
+        }
         await loadSkillsStatus();
         renderSettings();
       } catch (err) {
@@ -188,9 +196,40 @@ function bindSettingsEvents(c) {
     });
   });
 
+  // ── 会话级技能/插件开关（会话管理 → 设置 → 工具与技能）──
+  // 文件全局一份，启停写进 profile overrides；「默认会话」写全局默认。
+  $$('.skill-scope-toggle').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      const id = cb.dataset.skillId;
+      cb.disabled = true;
+      try {
+        const body = { enabled: cb.checked };
+        if (isSessionScope()) body.chat = state.settingsScope;
+        const r = await api(`/api/skills/${encodeURIComponent(id)}`, {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+        const idx = (state.skills || []).findIndex((s) => s.id === id);
+        if (idx >= 0 && r.skill) state.skills[idx] = r.skill;
+        if (r.config) state.config = r.config;
+        if (isSessionScope()) {
+          state.scopeOverrides = getProfile(state.settingsScope)?.overrides || state.scopeOverrides;
+          await loadChatProfiles({ quiet: true });
+          mountSessionRestoreButton();
+        }
+        await loadSkillsStatus();
+        renderSettings();
+      } catch (err) {
+        cb.checked = !cb.checked;
+        showAppAlert(`切换失败：${err.message}`);
+      } finally {
+        cb.disabled = false;
+      }
+    });
+  });
+
   // 单个工具开关
-  $$('.tool-checkbox').forEach((cb) => {
-    cb.addEventListener('change', () => {
+  $$('.tool-checkbox').forEach((cb) => {    cb.addEventListener('change', () => {
       const toolId = cb.dataset.toolId;
       state.config.tools = state.config.tools || {};
       // send_to 的勾选 = 「跨会话发送」开关本身（收编进消息发送分类）
@@ -207,7 +246,7 @@ function bindSettingsEvents(c) {
       }
       // 提示词预览面板已删除；开关状态直接走表单自动保存
       // 标脏走表单链（自动保存 'tools' 分支读 state.config.tools 整体提交）
-      const form = $('#settings-form');
+      const form = settingsFormRoot();
       if (form && form.__settingsBound) form.__settingsBound.markDirty(card || cb);
     });
   });
@@ -219,7 +258,7 @@ function bindSettingsEvents(c) {
       state.config.tools = state.config.tools || {};
       state.config.tools.categories = state.config.tools.categories || {};
       state.config.tools.categories[cat] = cb.checked;
-      const form = $('#settings-form');
+      const form = settingsFormRoot();
       if (form && form.__settingsBound) form.__settingsBound.markDirty(cb);
     });
   });
@@ -229,7 +268,7 @@ function bindSettingsEvents(c) {
   if (toolsEnabledCb) toolsEnabledCb.addEventListener('change', () => {
     state.config.tools = state.config.tools || {};
     state.config.tools.enabled = toolsEnabledCb.checked;
-    const form = $('#settings-form');
+    const form = settingsFormRoot();
     if (form && form.__settingsBound) form.__settingsBound.markDirty(toolsEnabledCb);
   });
 
@@ -784,7 +823,7 @@ function bindSettingsEvents(c) {
         renderSettings();
         // 高亮白名单区域
         setTimeout(() => {
-          const section = $('#settings-form');
+          const section = settingsFormRoot();
           if (section) {
             section.style.boxShadow = '0 0 0 3px var(--accent)';
             setTimeout(() => { section.style.boxShadow = ''; }, 2000);
@@ -876,52 +915,13 @@ function bindSettingsEvents(c) {
   
   syncPersonaButtons(false);   // 初始装填不播动画（重渲染后是全新节点）
 
-  // ── 白名单区块事件 ──
-  const pickGroupsBtn = $('#pick-groups-btn');
-  if (pickGroupsBtn) pickGroupsBtn.addEventListener('click', () => openWhitelistPicker('groups'));
-  const pickFriendsBtn = $('#pick-friends-btn');
-  if (pickFriendsBtn) pickFriendsBtn.addEventListener('click', () => openWhitelistPicker('friends'));
+  // ── 2026-10-21 会话个性化改版 ──
+  // 「聊天白名单」页与「统一/分会话人设」UI 已移除：
+  //   · 准入 → 左侧会话列表的「添加/移除」+「安全与准入」的 acceptAllSessions
+  //   · 按会话人设 → 会话面板「人设」分区（saveConfig 走会话覆盖链路）
+  // 白名单选择弹窗（openWhitelistPicker）成为死代码保留在 08 里，无入口。
 
-  // ── 按会话独立人设 ──
-  // 唯一真相是隐藏 input 里的 JSON（与分群档位滑条同一套做法）：
-  // ── 人设页：统一/分会话切换 + 分会话按钮网格 ──
-  // 统一开关：切显隐（不触发保存——display 切换不是配置变化，真正的值在 checkbox 上）。
-  const personaUnifiedChk = $('#cfg-persona-unified');
-  if (personaUnifiedChk) personaUnifiedChk.addEventListener('change', () => {
-    const ub = $('#persona-unified-box');
-    const pb = $('#persona-perchat-box');
-    if (ub) {
-      if (personaUnifiedChk.checked) uiShow(ub, () => { ub.style.display = ''; });
-      else uiHide(ub, () => { ub.style.display = 'none'; });
-    }
-    if (pb) {
-      if (personaUnifiedChk.checked) uiHide(pb, () => { pb.style.display = 'none'; });
-      else uiShow(pb, () => { pb.style.display = ''; });
-    }
-  });
-  // 分会话按钮：点开独立人设模态框（写回隐藏 JSON → 自动保存）
-  // root 判空：DOM 测试环境里 #persona-perchat-box 可能不在场（统一模式渲染时它存在，
-  // 但旧测试快照可能没这个节点——$$ 对 null root 直接抛错）
-  const perChatBox = $('#persona-perchat-box');
-  if (perChatBox) $$('.persona-chat-btn', perChatBox).forEach((btn) => {
-    btn.addEventListener('click', () => openPerChatPersonaModal(btn.dataset.chat));
-  });
-  // 分群模式的「全局人设设置」入口：编辑未单独配置会话所跟随的全局字段
-  $('#open-global-persona-btn')?.addEventListener('click', () => openGlobalPersonaModal());
-  // 群名异步补显：按钮文字先显示"群 号"，拉到群名后替换
-  api('/api/onebot/groups').then((d) => {
-    const names = new Map((d.groups || []).map((g) => [String(g.id), g.name]));
-    if (perChatBox) $$('.persona-chat-btn', perChatBox).forEach((btn) => {
-      const m = /^group:(\d+)$/.exec(String(btn.dataset.chat || ''));
-      if (!m) return;
-      const n = names.get(m[1]);
-      if (!n) return;
-      const hasDot = btn.textContent.includes('●');
-      btn.textContent = hasDot ? `${n} ●` : n;
-    });
-  }).catch(() => {});
-
-  // ── 检查更新（桌面端区块） ──
+  // ── 检查更新（系统与维护分区，原桌面端区块；元素 id 未变）──
   const curVerEl = $('#update-current');
   if (curVerEl) {
     api('/api/version').then((d) => { curVerEl.textContent = `v${d.version || '?'}`; })
@@ -985,3 +985,4 @@ function bindSettingsEvents(c) {
     resetDataBtn.disabled = false;
   });
 }
+

@@ -26,7 +26,8 @@ async function refreshStatus() {
     state.paused = s.paused;
     state.pauseReason = s.pauseReason;
     state.dataDir = s.dataDir || '';
-    $('#pause-btn').textContent = state.paused ? '恢复' : '暂停';
+    // 一键下线/上线（原「暂停/恢复」，2026-10-21 改名）
+    $('#pause-btn').textContent = state.paused ? '上线' : '下线';
     renderBanner();
     updateReadinessDots(s);
   } catch (e) { /* 忽略瞬时错误 */ }
@@ -42,7 +43,8 @@ function updateReadinessDots(s) {
   const slRunning = !!s?.snowluma?.running;
   const obConnected = !!s?.onebot?.connected;
   const cfg = state.config || {};
-  const cfgReady = !!(cfg.api?.baseUrl && cfg.api?.model && (cfg.allow?.groups?.length || cfg.allow?.private?.length || cfg.allowAllWhenEmpty));
+  const cfgReady = !!(cfg.api?.baseUrl && cfg.api?.model
+    && (cfg.acceptAllSessions === true || Object.keys(cfg.chatProfiles || {}).length > 0));
 
   // 圆点 0：QQ 内核
   dots[0].className = 'rdot' + (qqRunning ? ' on' : '');
@@ -103,11 +105,11 @@ function scheduleSessionRender() {
   sessionRenderScheduled = true;
   setTimeout(() => {
     sessionRenderScheduled = false;
-    if (state.tab === 'sessions') renderSessionList();
+    if (inCmSub('sessions')) renderSessionList();
     const id = state.currentSessionId;
     const patch = id ? pendingSessionDetail.get(id) : null;
     pendingSessionDetail.clear();
-    if (patch && state.tab === 'sessions') {
+    if (patch && inCmSub('sessions')) {
       // 详情用事件里的消息流渲染：HTTP 详情（systemPrompt 等）打底，SSE patch 覆盖动态字段。
       // sent/finishReason 等收尾字段 patch 优先 —— 它们走 SSE 实时推，HTTP 详情里的是旧值。
       renderSessionDetail({
@@ -124,3 +126,4 @@ function scheduleSessionRender() {
     }
   }, 80);
 }
+

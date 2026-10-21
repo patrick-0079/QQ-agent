@@ -9,6 +9,7 @@
 // 同一会话（群/私聊）同时最多一个运行；运行期间新消息只写 JSON（未读），不叠加触发。
 // 不同会话之间并行，受 maxConcurrentRuns 全局限流。
 import { getConfig, storeConfigForChat, personaForChat } from './config.js';
+import { withChatScope, isChatAdmitted, effectiveConfigForChat } from './chat-profiles.js';
 import { vendorOfConfig } from './model-prices.js';
 import { randInt } from './util.js';
 import { buildSystemPrompt, buildUserPrompt, resolveContextTier } from './prompt.js';
@@ -164,6 +165,11 @@ export class Orchestrator {
    * 与 contextLimit 对不上账）。窗口只是聚批，不是判定窗口。
    */
   onIncoming(chatKey, entry = null) {
+    // 会话配置作用域：本次判定读到的模型/人设/档位都是**这个群/私聊**的生效值。
+    return withChatScope(chatKey, () => this.#onIncomingInner(chatKey, entry));
+  }
+
+  #onIncomingInner(chatKey, entry = null) {
     if (this.paused || this.aborted) return;
     // 运行中 / 倒计时中：消息保持未读（不判定、不重置），由会话结束的
     // drain 路径补判定（见 wake 末尾的 drain 注释）。
@@ -346,6 +352,12 @@ export class Orchestrator {
   // ── 核心循环 ───────────────────────────────────────────────────────────
 
   async wake(chatKey, { proactive = false, waitingSessionId = null, reuseSessionId = null } = {}) {
+    // 整个唤醒链路（取批 → 判定 → #runAgent → 发送 → 记忆整理）都在
+    // 该会话的配置作用域里执行：模型/提示词/档位/工具/发送节奏一律按会话生效。
+    return withChatScope(chatKey, () => this.#wakeInner(chatKey, { proactive, waitingSessionId, reuseSessionId }));
+  }
+
+  async #wakeInner(chatKey, { proactive = false, waitingSessionId = null, reuseSessionId = null } = {}) {
     if (this.aborted) { if (waitingSessionId) this.#finishWaiting(waitingSessionId, 'aborted'); return; }
     if (this.paused && !proactive) { if (waitingSessionId) this.#finishWaiting(waitingSessionId, 'aborted'); return; }
     if (this.runningChats.has(chatKey)) return;
@@ -1332,6 +1344,10 @@ export class Orchestrator {
 
   /** 触发一条提醒：往对应群/私聊发一条提醒消息（走正常发送管道，留档）。 */
   async #fireReminder(r) {
+    return withChatScope(r.chatKey, () => this.#fireReminderInner(r));
+  }
+
+  async #fireReminderInner(r) {
     const [kind, id] = String(r.chatKey || '').split(':');
     if (!kind || !id) return;
     const text = `⏰ 提醒：${r.text}`;
@@ -1374,12 +1390,14 @@ export class Orchestrator {
 
   #proactiveCandidates(cfg) {
     const idleMs = Math.max(300000, Number(cfg.proactive?.idleThresholdMs) || 1800000);
-    const allowGroups = (cfg.allow?.groups ?? []).map(String);
     const out = [];
     for (const chatKey of this.store.listChats()) {
-      const [kind, id] = chatKey.split(':');
+      const [kind] = chatKey.split(':');
       if (kind !== 'group') continue;
-      if (allowGroups.length > 0 ? !allowGroups.includes(id) : !cfg.allowAllWhenEmpty) continue;
+      // 准入 + 每会话主动开话题开关（effectiveConfigForChat 里已合并 profile 覆盖）
+      if (!isChatAdmitted(chatKey)) continue;
+      const eff = effectiveConfigForChat(chatKey);
+      if (eff.proactive?.enabled !== true) continue;
       const meta = this.store.getChatMeta(chatKey);
       if (meta.unread > 0) continue;
       if (Date.now() - meta.lastTs < idleMs) continue;
@@ -1501,6 +1519,11 @@ export class Orchestrator {
    *   4) 既无名也无号 → 跳过。
    */
   async consolidateMemoryForChat(chatKey, { userIds = null, force = false } = {}) {
+    // 记忆整理读的模型/冷却等配置按会话生效（如某会话配了专用整理模型）。
+    return withChatScope(chatKey, () => this.#consolidateMemoryForChatInner(chatKey, { userIds, force }));
+  }
+
+  async #consolidateMemoryForChatInner(chatKey, { userIds = null, force = false } = {}) {
     const cfg = getConfig();
     if (!cfg.api?.model || !cfg.api?.baseUrl) throw new Error('模型未配置，无法整理记忆');
     const notes = cfg.memberNotes || {};

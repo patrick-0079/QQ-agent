@@ -29,10 +29,11 @@ $$('.tab').forEach((tab) => {
       if (THEME_VALUES.includes(t)) applyTheme(t);
     } catch { /* 接口不可用就用本地的 */ }
 
-    // 首启引导：关键配置（模型/白名单）没填就直接带去设置页
+    // 首启引导：关键配置（模型/准入）没填就直接带去设置页
     try {
       const cfg = await api('/api/config');
-      const ready = !!cfg.api.model && ((cfg.allow.groups?.length || cfg.allow.private?.length) || cfg.allowAllWhenEmpty);
+      const ready = !!cfg.api.model
+        && (cfg.acceptAllSessions === true || Object.keys(cfg.chatProfiles || {}).length > 0);
       if (!ready) {
         switchTab('settings');
         connectSSE();
@@ -44,8 +45,8 @@ $$('.tab').forEach((tab) => {
     refreshStatus();
     startStatusPoller();
     connectSSE();
-    loadSessions();
-    loadMemoryView();
+    // 首屏默认就是「会话管理」：加载默认会话的运行记录
+    switchTab('chatmanage');
     initSessionScrollLoader();
   } catch (err) {
     // 启动链路任何一步抛错都必须摘掉加载遮罩 —— 否则整窗被

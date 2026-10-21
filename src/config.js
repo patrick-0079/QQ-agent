@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PERSONAS } from './personas.js';
 import { sliderToTier } from './tier-slider.js';   // 零依赖模块，避免循环依赖
+import { scopedConfig } from './config-scope.js';  // 会话配置作用域（ALS，见该文件头注释）
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, '..');
@@ -187,20 +188,18 @@ export const DEFAULT_CONFIG = {
   },
   // 用户自定义人设库（保存在配置里，可在设置页添加/选择）
   customPersonas: [],
-  // 按会话独立人设：{ [群号/QQ号]: { roleText, participation, customRules, systemPromptOverride } }
-  // key 是白名单会话的 id（群号或私聊 QQ 号），值是该会话覆盖全局 persona 的字段；
-  // 只覆盖写在这里的字段，其余（botName/selfNickname 等账号身份）永远用全局值 ——
-  // 名字换了会和 @ 判定、存档里"我"的称呼对不上。
-  personaByChat: {},
-  // 统一人设（人设页开关）：true = 所有用一套全局人设；false = 人设页展示分会话
-  // 独立编辑入口（personaByChat 生效）。运行语义与 UI 一致（personaForChat 在
-  // 统一模式下不读 personaByChat）—— 否则统一开关形同虚设：旧分会话条目会
-  // 继续静默覆盖全局人设，而 UI 已把编辑入口藏起来了。
-  personaUnified: true,
-  // 接入白名单
-  allow: { groups: [], private: [] },
+  // ── 会话个性化（2026-10-21 改版）──
+  // 准入：acceptAllSessions=true 时接受所有会话（不在 chatProfiles 里的走默认配置）；
+  // false 时只有 chatProfiles 里存在的会话被准入。deny / globalBlocklist 仍然全局生效。
+  // chatProfiles[key].overrides 只存“与默认不同”的字段，合并与准入见 src/chat-profiles.js。
+  acceptAllSessions: false,
+  chatProfiles: {},
+  // 屏蔽（全局，优先于准入）：谁的消息一律不存档/不触发。运行时见
+  // isChatAdmitted —— 曾经的 deny 是旧白名单的一半，如今作为黑名单保留。
   deny: { groups: [], private: [] },
-  allowAllWhenEmpty: false,
+  // 旧字段 allow / allowAllWhenEmpty / personaByChat / personaUnified /
+  // store.unifiedTier / groupSliderPos / groupPeakPos 已在启动迁移时转换并删除。
+
   // 运行节奏
   wakeDelayMs: 2000,        // 空闲时收到消息到发起运行的防抖窗口（等连发聚成一批）
   drainDelayMs: 1200,       // 一次运行结束后发现还有未读，到下一次运行的间隔
@@ -276,13 +275,6 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       maxExtraRead: 5           // 相对锚定时的已读条数，最多额外追加几条
     },
-    // ── 响应档位的作用范围 ──
-    unifiedTier: true,          // true = 上方滑条对所有会话生效；false = 可按群单独设置
-    groupSliderPos: {},         // { [群号]: 0~100 } 仅 unifiedTier=false 时生效；未设置的群/私聊跟随全局滑条
-    // 分群峰谷（2026-09-18 四象限改版）：unifiedTier=false 且 peakSchedule.enabled 时，
-    // 每个群可以有自己的峰谷档位 { [群号]: { peak: 0~100, valley: 0~100 } }。
-    // 时段（start/end）全局共享 —— 每群分开拖两个点的档位值即可。
-    groupPeakPos: {},           // { [群号]: { peak: 0~100, valley: 0~100 } }，未设置的群跟随全局峰谷双点
     keepSessionFiles: 0,        // 保留最近多少个会话记录文件；**0 = 不限制**（原为 300）
     // ── 峰谷切换（按时段自动调整响应档位）──
     // 允许用户设定"高峰/低谷"两个时段及各自生效的响应档位（滑条位置 0~100）。
@@ -404,12 +396,84 @@ export function deepMerge(base, override) {
   return out;
 }
 
+/**
+ * 旧配置迁移（2026-10-21 会话个性化改版，幂等）：
+ *   · allow.groups / allow.private      → chatProfiles["group:<id>"] / ["private:<id>"]（准入）
+ *   · allowAllWhenEmpty:true            → acceptAllSessions:true
+ *   · personaByChat（仅 personaUnified=false 时生效过）→ profile.overrides.persona
+ *   · store.groupSliderPos / groupPeakPos（仅 unifiedTier=false 时生效过）→ profile.overrides.store
+ * 迁移后旧字段交给 stripObsoleteFields 删除 —— 运行时只认 chatProfiles 一套真相。
+ */
+export function migrateChatProfiles(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
+  const out = { ...parsed };
+  const profiles = (out.chatProfiles && typeof out.chatProfiles === 'object' && !Array.isArray(out.chatProfiles))
+    ? { ...out.chatProfiles }
+    : {};
+  const ensure = (key) => {
+    if (!profiles[key]) {
+      profiles[key] = { alias: '', pinnedAt: 0, overrides: {} };
+    } else {
+      if (typeof profiles[key].overrides !== 'object' || !profiles[key].overrides) profiles[key].overrides = {};
+    }
+    return profiles[key];
+  };
+  const allow = (out.allow && typeof out.allow === 'object') ? out.allow : {};
+  for (const g of (allow.groups || [])) ensure(`group:${String(g)}`);
+  for (const u of (allow.private || [])) ensure(`private:${String(u)}`);
+  if (out.allowAllWhenEmpty === true && out.acceptAllSessions === undefined) out.acceptAllSessions = true;
+
+  // personaByChat 的键可能是 chatKey（group:123）也可能是裸 id —— 兼容两种
+  const groups = (allow.groups || []).map(String);
+  const privates = (allow.private || []).map(String);
+  const resolveKey = (k) => {
+    if (/^(group|private):[A-Za-z0-9_-]+$/.test(String(k))) return String(k);
+    if (groups.includes(String(k))) return `group:${k}`;
+    if (privates.includes(String(k))) return `private:${k}`;
+    return null;
+  };
+  const pb = (out.personaByChat && typeof out.personaByChat === 'object') ? out.personaByChat : null;
+  if (pb && out.personaUnified === false) {
+    for (const [k, v] of Object.entries(pb)) {
+      if (!v || typeof v !== 'object') continue;
+      const key = resolveKey(k);
+      if (!key) continue;
+      const p = ensure(key);
+      p.overrides.persona = { ...(p.overrides.persona || {}), ...v };
+    }
+  }
+  const store = (out.store && typeof out.store === 'object') ? out.store : {};
+  const peakCfg = (store.peakSchedule && typeof store.peakSchedule === 'object') ? store.peakSchedule : {};
+  if (store.unifiedTier === false) {
+    for (const [id, pos] of Object.entries(store.groupSliderPos || {})) {
+      if (pos === undefined || pos === null) continue;
+      const p = ensure(`group:${id}`);
+      p.overrides.store = { ...(p.overrides.store || {}), contextSliderPos: pos };
+    }
+    for (const [id, pv] of Object.entries(store.groupPeakPos || {})) {
+      if (!pv || typeof pv !== 'object') continue;
+      const p = ensure(`group:${id}`);
+      p.overrides.store = {
+        ...(p.overrides.store || {}),
+        peakSchedule: {
+          ...(peakCfg || {}),
+          enabled: true,
+          peak: { ...(peakCfg.peak || {}), sliderPos: pv.peak },
+          valley: { sliderPos: pv.valley ?? 100 }
+        }
+      };
+    }
+  }
+  out.chatProfiles = profiles;
+  return out;
+}
+
 export function loadConfig() {
   try {
     let text = fs.readFileSync(CONFIG_FILE, 'utf8');
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     const parsed = JSON.parse(text);
-    return deepMerge(DEFAULT_CONFIG, stripObsoleteFields(migrateLegacySkills(parsed)));
+    return deepMerge(DEFAULT_CONFIG, stripObsoleteFields(migrateLegacySkills(migrateChatProfiles(parsed))));
   } catch (error) {
     // ⚠️ 配置文件坏了（手改错/磁盘故障）不能静默回落默认值：
     //   曾经直接返回 DEFAULT，随后任何 updateConfig（比如 5 分钟一次的
@@ -516,7 +580,16 @@ const OBSOLETE_PATHS = [
   ['store', 'peakSchedule', 'valley', 'start'],
   ['store', 'peakSchedule', 'valley', 'end'],
   ['store', 'peakSchedule', 'custom', 'valley', 'start'],
-  ['store', 'peakSchedule', 'custom', 'valley', 'end']
+  ['store', 'peakSchedule', 'custom', 'valley', 'end'],
+  // 2026-10-21 会话个性化改版：白名单与按群映射表 → chatProfiles（见 migrateChatProfiles），
+  // 迁移完成后这些字段在这里统一剔除，避免"两套真相"继续漂移。
+  ['allow'],
+  ['allowAllWhenEmpty'],
+  ['personaByChat'],
+  ['personaUnified'],
+  ['store', 'unifiedTier'],
+  ['store', 'groupSliderPos'],
+  ['store', 'groupPeakPos']
 ];
 
 export function stripObsoleteFields(node) {
@@ -537,11 +610,29 @@ export function stripObsoleteFields(node) {
 }
 
 let currentConfig = null;
+// 配置版本号：每次落盘/内存态变化 +1。会话个性化用它判断"合并缓存是否过期"。
+let configVersion = 0;
 
-/** 取当前生效配置（未初始化时从磁盘读）。 */
+/**
+ * 取当前生效配置。
+ * · 在会话配置作用域内（orchestrator 运行某个群/私聊时）→ 全局 + 会话覆盖；
+ * · 其余情况（HTTP 路由、启动、UI 默认视图）→ 全局配置。
+ */
 export function getConfig() {
+  const scoped = scopedConfig();
+  if (scoped) return scoped;
+  return getGlobalConfig();
+}
+
+/** 取**全局**配置（忽略会话作用域）。会话管理/写配置/跨会话逻辑用这个。 */
+export function getGlobalConfig() {
   if (!currentConfig) currentConfig = loadConfig();
   return currentConfig;
+}
+
+/** 当前全局配置版本（会话覆盖合并缓存的失效依据）。 */
+export function getConfigVersion() {
+  return configVersion;
 }
 
 /**
@@ -602,11 +693,12 @@ export function updateConfig(patch) {
   // 一次普通的设置保存就把所有自定义搜索服务的 Key 静默清空（表现为掩码消失、
   // 测试报 invalid API key）。这里在合并前把"patch 条目缺密钥字段"的数组按 id
   // 回填现值；想真清除必须显式传 apiKey: ''（专用清除按钮就是显式空串路径）。
-  preserveSanitizedSecrets(getConfig(), cleanObsolete);
-  currentConfig = deepMerge(getConfig(), cleanObsolete);
+  preserveSanitizedSecrets(getGlobalConfig(), cleanObsolete);
+  currentConfig = deepMerge(getGlobalConfig(), cleanObsolete);
   // 磁盘上可能已经存过历史遗留的派生标记，一并清掉
   stripDerivedFlags(currentConfig);
   stripObsoleteFields(currentConfig);
+  configVersion += 1;
 
   // ── 响应档位：以滑条位置为唯一真相，派生 tier 与随机概率 ──
   // 前端只负责上报滑条位置（contextSliderPos），档位和概率一律由这里换算。
@@ -628,90 +720,41 @@ export function updateConfig(patch) {
 /** 内存态改动（不落盘）——用于运行期覆盖（如自测注入 mock）。 */
 export function setRuntimeConfig(cfg) {
   currentConfig = cfg;
+  configVersion += 1;
 }
 
 /**
- * 取某个会话实际生效的人设：全局 persona 被 personaByChat[id] 的同名字段覆盖。
- *
- * 只允许覆盖 roleText / participation / customRules / systemPromptOverride 四个
- * "说话风格"字段；botName / selfNickname 是账号身份，任何会话都不得单独改 ——
+ * 取某个会话实际生效的人设。
+ * 2026-10-21 改版：按会话差异统一存进 chatProfiles[key].overrides.persona，
+ * 运行时进入会话作用域后 getConfig().persona 已经是"默认 + 覆盖"的合并结果，
+ * 这里直接返回；旧 personaByChat 映射在启动迁移时已转换并删除。
+ * botName / selfNickname 属于账号身份，合并层（chat-profiles.js）不允许覆盖 ——
  * 换了会与 @ 判定（isAtMe 用昵称/名字匹配）、存档里"我"的称呼全部对不上。
- * 覆盖值一律做字符串 trim（空串视为"未设置"，回落全局值）。
- *
- * ⚠️ personaUnified = true（"为所有的群聊/私聊使用同一个人设"）时，
- *    personaByChat 的条目**不再生效**（统一人设是用户明确表态，遗留的
- *    分会话条目继续覆盖会让"所有会话共用这一套人设"的 UI 承诺落空，
- *    且统一模式下 UI 隐藏了分会话编辑入口，用户无从发现也无处改）。
- *    开关关掉后条目恢复生效 —— 数据不删，只是不再参与合并。
  */
 export function personaForChat(chatKey) {
-  const base = getConfig().persona || {};
-  const [kind, id] = String(chatKey || '').split(':');
-  if (!id) return base;
-  // 统一人设模式：一律用全局，不看 personaByChat
-  if (getConfig().personaUnified !== false) return base;
-  const perChat = getConfig().personaByChat || {};
-  // 兼容两种键格式：UI 的隐藏 JSON 以 chatKey（group:123）为键保存，
-  // 而这里按 id 段（123）查 —— 只认一种格式时保存成功但永不生效
-  // （2026-09-17 用户实测踩中：独立人设存了却一直跟随全局）。
-  const raw = perChat[String(id)] ?? perChat[String(chatKey)];
-  if (!raw || typeof raw !== 'object') return base;
-  const pick = (v) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
-  const out = { ...base };
-  if (kind === 'group' || kind === 'private') {
-    const roleText = pick(raw.roleText);
-    const customRules = pick(raw.customRules);
-    const systemPromptOverride = pick(raw.systemPromptOverride);
-    if (roleText !== undefined) out.roleText = roleText;
-    if (customRules !== undefined) out.customRules = customRules;
-    if (systemPromptOverride !== undefined) out.systemPromptOverride = systemPromptOverride;
-    if (['low', 'medium', 'high'].includes(raw.participation)) out.participation = raw.participation;
-  }
-  return out;
+  return getConfig().persona || {};
 }
 
 /**
- * 取某个会话实际生效的 store 档位配置。
- * unifiedTier 开启 → 全局 store 原样返回；
- * 关闭 → 群聊查 groupSliderPos，有单独设置就换算出该群的 tier/randomPercent，
- * 其余字段（各档读取条数、关键词表）沿用全局值。私聊永远跟随全局档位。
- *
- * 峰谷切换：peakSchedule.enabled 时，先按当前时间判定落在高峰/低谷时段，
- * 用该时段的 sliderPos 换算出档位**覆盖**全局滑条（在 unifiedTier / 分群设置之前生效）。
+ * 取某个会话实际生效的档位配置。
+ * 2026-10-21 改版：档位差异统一存进 chatProfiles[key].overrides.store，
+ * 会话作用域内的 getConfig().store 已经合并过；这里在合并结果上套
+ * 指令禁言强制档位与峰谷时段换算（这两者都是"当下状态"，不能进配置覆盖）。
  */
 export function storeConfigForChat(chatKey) {
-  const store = getConfig().store || {};
+  const store = (scopedConfig() ? getConfig() : getGlobalConfig()).store || {};
   // ── 指令禁言：该群被禁言且未到期 → 强制 1 档（仅艾特）──
   const mutedTier = commandMuteTier(chatKey);
   if (mutedTier !== null) {
     return { ...store, contextTier: 1, randomPercent: 0 };
   }
-  const [kind, id] = String(chatKey || '').split(':');
-  const isGroup = kind === 'group' && !!id;
   const peakOn = store.peakSchedule?.enabled === true;
   const inPeakNow = peakOn && peakWindowActive(store.peakSchedule);
-
-  // ── 四象限（2026-09-18 改版）──
-  //   统一 + 峰谷关：全局滑条（contextSliderPos）
-  //   统一 + 峰谷开：全局峰谷双点按时段取高峰/低谷
-  //   分群 + 峰谷关：群无单独设置 → 全局滑条；有 → groupSliderPos[群]
-  //   分群 + 峰谷开：群无单独峰谷 → 全局双点按时段取；有 → groupPeakPos[群] 按时段取
-  // 私聊永远跟随"全局"口径（峰谷开时同样受时段影响）。
   let pos = clampSliderPos(store.contextSliderPos);
   if (peakOn) {
-    if (isGroup && store.unifiedTier === false) {
-      const gp = store.groupPeakPos?.[id];
-      pos = gp
-        ? clampSliderPos(inPeakNow ? gp.peak : gp.valley)
-        : (inPeakNow ? clampSliderPos(store.peakSchedule.peak?.sliderPos) : clampSliderPos(store.peakSchedule.valley?.sliderPos));
-    } else {
-      pos = inPeakNow
-        ? clampSliderPos(store.peakSchedule.peak?.sliderPos)
-        : clampSliderPos(store.peakSchedule.valley?.sliderPos);
-    }
-  } else if (isGroup && store.unifiedTier === false) {
-    const gp = store.groupSliderPos?.[id];
-    if (gp !== undefined && gp !== null) pos = clampSliderPos(gp);
+    pos = inPeakNow
+      ? clampSliderPos(store.peakSchedule.peak?.sliderPos)
+      : clampSliderPos(store.peakSchedule.valley?.sliderPos);
   }
   const { tier, randomPercent } = sliderToTier(pos);
   return { ...store, contextSliderPos: pos, contextTier: tier, randomPercent };

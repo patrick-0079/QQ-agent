@@ -138,9 +138,9 @@ export function setup(api) {
 
 就这两个文件。放进 `skills/my-skill/`，**默认就生效**（热重载开着，见 §9）。
 
-> **在哪看它？** 控制台顶部的 **「技能」页签**——
+> **在哪看它？** 控制台顶部的 **「技能仓库」页签**——
 > 那一页列出全部 LLM 型技能、各自注册的工具、以及"为什么没生效"。
-> 旁边还有一个 **「插件」页签**（确定性型，`plugins/`），两页互不混入 ——
+> 旁边还有一个 **「插件仓库」页签**（确定性型，`plugins/`），两页互不混入 ——
 > 所以如果你把技能放错到 `plugins/` 里，它会出现在「插件」页而不是「技能」页。
 
 也可以让脚手架生成骨架：
@@ -585,3 +585,5 @@ export function setup(api) {
 - [skill-reference.md](./skill-reference.md) —— 共同机制完整参考（清单、生命周期、能力系统、ctx 全量字段、硬约束清单）
 - [snowluma-capabilities.md](./snowluma-capabilities.md) —— 协议端 73 个接口的逐条参数表
 - [skill-system.md](./skill-system.md) —— 架构总览
+
+

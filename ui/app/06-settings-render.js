@@ -34,56 +34,7 @@ function visionVerdictOf(providerId, model) {
 
 
 
-function renderSettingsSidebar() {
-  const s = state.status;
-  const sidebar = $('#settings-sidebar');
-  if (!sidebar) return;
-  const menu = [
-    ['api', '模型 API'],
-    ['search', '搜索服务'],
-    ['memory', '记忆'],
-    ['persona', '人设'],
-    ['allow', '聊天白名单'],
-    ['chat', '聊天设置'],
-    ['desktop', '桌面端'],
-    ['onebot', 'OneBot（SnowLuma）'],
-    ['tools', '工具与技能']
-  ];
-  sidebar.innerHTML = `
-    <div class="settings-runstate">
-      <div class="rs-title">机器人运行状态</div>
-      <div class="rs-row"><span class="dot ${s?.onebot?.connected ? 'dot-on' : 'dot-off'}"></span><span>${s?.onebot?.connected ? '运行中' : '未就绪'}</span></div>
-      <div class="rs-row muted">${state.paused ? '⏸ 已暂停' : (s?.orchestrator?.model ? `模型：${esc(s.orchestrator.model)}` : '模型：未设置')}</div>
-    </div>
-    <div class="settings-menu">
-      ${menu.map(([id, label]) => `<button class="settings-menu-item ${state.settingsSection === id ? 'active' : ''}" data-section="${id}">${label}${id === 'desktop' && (typeof updateAvailable !== 'undefined' && updateAvailable) ? '<span class="update-dot" title="发现新版本"></span>' : ''}</button>`).join('')}
-      <button class="settings-menu-item egg-hot" id="qrcode-egg-btn">！？群群？！</button>
-    </div>`;
-  // 群二维码彩蛋：点一下弹出，再点屏幕任意位置关闭
-  // 图片 onerror 兜底：group-qrcode.jpg 正常随 ui/ 分发，
-  // 万一分发包缺了这张图，显示一句说明而不是一个裂图图标。
-  sidebar.querySelector('#qrcode-egg-btn')?.addEventListener('click', () => {
-    const ov = document.createElement('div');
-    ov.className = 'qrcode-egg-overlay';
-    ov.innerHTML = '<img src="group-qrcode.jpg" alt="群二维码" '
-      + 'onerror="this.remove(); this.parentElement?.insertAdjacentText(\'afterbegin\', \'二维码图片缺失：请把 group-qrcode.jpg 放到 ui/ 目录下\')" />';
-    const close = () => closeAnimatedOverlay(ov);
-    ov.addEventListener('click', close);
-    document.body.appendChild(ov);
-  });
-  sidebar.querySelectorAll('.settings-menu-item').forEach((el) => {
-    el.addEventListener('click', () => {
-      // 切区块 = 整页表单重建：先把防抖窗口内挂起的保存发出，
-      // 否则刚输入的内容直接被重渲染吹掉（与切页签同一条防线）。
-      flushSettingsSaves();
-      state.settingsSection = el.dataset.section;
-      renderSettingsSidebar();
-      renderSettings();
-      // 切设置分区 = 整页表单重建：新内容淡入（对齐 concept2 的 pane 切换）
-      uiEnter($('#settings-form'));
-    });
-  });
-}
+
 
 function renderSettings() {
   // 渲染守卫：自动保存进行中（表单正在被读取 / state.config 即将被覆盖）时
@@ -100,7 +51,7 @@ function renderSettings() {
   //   ① 记下正在聚焦的输入框 id + 光标位置 + 当前值；
   //   ② 重建后按 id 找回元素，把值写回（渲染用的是 state.config，可能还没
   //      带上防抖窗口内的输入），恢复焦点与光标。
-  const box = $('#settings-form');
+  const box = settingsFormRoot();
   // 滚动位置保持：innerHTML 重建会把阅读位置弹回顶部（也是一次大滚动跳转，
   // 会加剧深滚动下的合成错位）。重建后原样恢复。
   const prevScrollTop = box ? box.scrollTop : 0;
@@ -124,6 +75,9 @@ function renderSettings() {
     // 挂在 #settings-form 上的委托不受影响。放后面绑定则能找到最终结构。
     if (typeof enhanceConcept2UI === 'function') enhanceConcept2UI(box);
     bindSettingsEvents(c);
+    // 会话面板：分区标签切换 + 分区菜单行尾的"恢复默认/跟随默认"标记
+    if (typeof bindSessionTabs === 'function') bindSessionTabs(box);
+    if (typeof mountSessionRestoreButton === 'function') mountSessionRestoreButton();
     if (box && prevScrollTop) box.scrollTop = prevScrollTop;
   } catch (err) {
     // 单个设置区渲染失败不能让整页空白 —— 显示错误占位，其余页签仍可用
@@ -146,23 +100,24 @@ function renderSettings() {
   if (!(state.chats || []).length && !renderSettings.__chatsFetch) {
     renderSettings.__chatsFetch = true;
     api('/api/chats').then((d) => {
-      if ((d.chats || []).length && state.tab === 'settings') renderSettings();
+      if ((d.chats || []).length && settingsTabActive()) renderSettings();
     }).catch(() => {}).finally(() => { renderSettings.__chatsFetch = false; });
   }
 }
 
 function renderSettingsSection(c) {
+  // 2026-10-21 改版：
+  //   · 全局视图 → 只渲染"全局通用"分区（模型 API / 搜索 / 安全与准入 / 系统与维护）
+  //   · 会话视图（含"默认设置"）→ 会话面板（人设/记忆/聊天设置/工具与技能）
+  if (state.settingsView === 'session') {
+    return renderSessionSettingsSection(c);
+  }
   const sec = state.settingsSection || 'api';
   const sections = {
     api: () => renderApiSection(c),
     search: () => renderSearchSection(c),
-    memory: () => renderMemorySettingsSection(c),
-    persona: () => renderPersonaSection(c),
-    allow: () => renderAllowSection(c),
-    chat: () => renderChatSection(c),
-    desktop: () => renderDesktopSection(c),
-    onebot: () => renderOnebotSection(c),
-    tools: () => renderToolsSection(c)
+    security: () => renderSecuritySection(c),
+    system: () => renderSystemSection(c)
   };
   const render = sections[sec] || sections.api;
   return `
@@ -409,22 +364,22 @@ function renderMemorySettingsSection(c) {
 }
 
 function renderPersonaSection(c) {
-  // 统一人设开关：开启（默认）= 所有用同一套全局人设（下方完整编辑器）；
-  // 关闭 = 每个白名单会话一个按钮，点开模态框单独编辑（personaByChat）。
-  const unified = c.personaUnified !== false;
-  const perChat = c.personaByChat || {};
-  const allowIds = [
-    ...(c.allow?.groups || []).map((g) => `group:${g}`),
-    ...(c.allow?.private || []).map((p) => `private:${p}`)
-  ].map(String);
-  const extraIds = Object.keys(perChat).filter((id) => !allowIds.includes(id));
-  const chatIds = [...allowIds, ...extraIds];
-
-  const unifiedEditor = `
-    ${renderPersonaPicker(c)}
+  // 2026-10-21 改版：人设只有一处编辑入口 —— 会话面板。
+  //   · 「默认设置」里编辑 = 全局默认（含按会话未覆盖的字段）
+  //   · 某个会话里编辑 = 本会话覆盖（跟随默认的学说在 saveConfig 里用 diff 处理）
+  // botName / selfNickname 是账号身份（@ 判定 / 存档称呼依赖），只在默认设置里可改。
+  const isDefault = state.settingsView === 'session' && state.settingsScope === 'default';
+  const identityRow = isDefault ? `
     <div class="field-row">
       <div class="field"><label>机器人名字</label><input type="text" id="cfg-botname" value="${esc(c.persona.botName)}" /></div>
       <div class="field"><label>群内展示名（可选）</label><input type="text" id="cfg-selfnick" value="${esc(c.persona.selfNickname || '')}" /></div>
+    </div>` : `
+    <div class="hint" style="margin-bottom:10px">机器人名字 / 群内展示名是账号身份，只能在「默认设置」里改（改了会影响 @ 判定与存档称呼）。</div>`;
+  return `
+    <h3>人设</h3>
+    ${identityRow}
+    ${renderPersonaPicker(c)}
+    <div class="field-row">
       <div class="field"><label>参与度</label>
         <select id="cfg-participation">
           <option value="low" ${c.persona.participation === 'low' ? 'selected' : ''}>安静型</option>
@@ -444,263 +399,6 @@ function renderPersonaSection(c) {
         可用占位符：<code>{botName}</code> <code>{roleText}</code> <code>{participation}</code>。留空则完全不影响现有行为。
       </div>
     </div>`;
-
-  // 分会话模式：按钮网格（白名单 ∪ 已配置过的会话）
-  const chatButtons = chatIds.map((chatKey) => {
-    const conf = perChat[chatKey] || {};
-    const hasCustom = Boolean(conf.roleText || conf.participation || conf.customRules || conf.systemPromptOverride);
-    const title = formatChatTitle(chatKey, extraIds.includes(chatKey) ? '' : chatNameOf(chatKey));
-    return `
-      <button class="btn persona-chat-btn ${hasCustom ? 'has-custom' : ''}" data-chat="${esc(chatKey)}" title="${esc(title)}的人设">
-        ${esc(title)}${hasCustom ? ' ●' : ''}
-      </button>`;
-  }).join('');
-
-  return `
-    <h3>人设</h3>
-    <div class="checkbox-row"><input type="checkbox" id="cfg-persona-unified" ${unified ? 'checked' : ''} />
-      <label for="cfg-persona-unified">为所有的群聊/私聊使用同一个人设</label></div>
-    <div class="hint" style="margin-bottom:12px">${unified
-      ? '所有会话共用下方这一套人设。'
-      : '每个会话独立人设：点按对应按钮弹窗编辑（● = 已配置独立人设；未配置的跟随全局人设的字段）。机器人名字/群内展示名是账号身份，只能全局设置。'}</div>
-    <div id="persona-unified-box" style="${unified ? '' : 'display:none'}">
-      ${unifiedEditor}
-    </div>
-    <div id="persona-perchat-box" style="${unified ? 'display:none' : ''}">
-      <div class="field" style="margin-bottom:10px">
-        <button class="btn" id="open-global-persona-btn">⚙ 全局人设设置（未单独配置的会话用这套）</button>
-      </div>
-      <div class="persona-chat-grid">${chatButtons || '<div class="hint">（白名单为空——先在「聊天白名单」里添加群聊/私聊）</div>'}</div>
-    </div>`;
-}
-
-/**
- * 「全局人设设置」模态框（2026-09-18）：统一人设关闭（分群模式）时，
- * persona 主编辑器不在场 —— 没有独立人设的会话跟随的全局字段就没了编辑入口。
- * 这里弹出同款字段（选择人设 / 参与度 / 角色设定 / 附加规则 / 系统提示覆盖 /
- * 机器人名字 / 群内展示名），保存直接 POST /api/config 的 persona 补丁。
- */
-function openGlobalPersonaModal() {
-  const c = state.config || {};
-  const per = c.persona || {};
-  const overlay = modelModalShell({
-    head: '全局人设设置',
-    body: `
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="text" id="gp-pick" readonly placeholder="点击选择人设" value="${esc(Object.values(state.personaTemplates || {}).find((p) => p.text === (per.roleText || ''))?.name || '')}" style="flex:1;cursor:pointer" />
-        <button class="btn btn-small" id="gp-new-btn">＋ 添加人设</button>
-      </div>
-      <div class="field-row">
-        <div class="field"><label>机器人名字</label><input type="text" id="gp-botname" value="${esc(per.botName || '')}" /></div>
-        <div class="field"><label>群内展示名（可选）</label><input type="text" id="gp-selfnick" value="${esc(per.selfNickname || '')}" /></div>
-        <div class="field"><label>参与度</label>
-          <select id="gp-participation">
-            <option value="low" ${per.participation === 'low' ? 'selected' : ''}>安静型</option>
-            <option value="medium" ${per.participation === 'medium' ? 'selected' : ''}>普通群友</option>
-            <option value="high" ${per.participation === 'high' ? 'selected' : ''}>活跃型</option>
-          </select></div>
-      </div>
-      <div class="field"><label>角色设定</label>
-        <textarea id="gp-roletext" class="persona-role-text" style="min-height:180px" placeholder="例如：你是运维群里的老油条……">${esc(per.roleText || '')}</textarea></div>
-      <div class="field"><label>管理员附加规则（可选，追加到系统提示）</label>
-        <textarea id="gp-customrules" class="persona-role-text" style="min-height:80px">${esc(per.customRules || '')}</textarea></div>
-      <div class="field"><label>系统提示词覆盖（高级 · 可选）</label>
-        <textarea id="gp-sysprompt" class="persona-role-text" style="min-height:80px" placeholder="留空 = 使用内置默认系统提示词">${esc(per.systemPromptOverride || '')}</textarea></div>
-      <div class="hint" style="margin-top:6px">未配置独立人设的群聊/私聊全部使用这套全局字段。</div>`,
-    foot: `<button class="btn" id="gp-cancel">取消</button>
-           <button class="btn btn-primary" id="gp-save">保存</button>`
-  });
-
-  // 选择人设：与统一编辑器同一份模板列表
-  overlay.querySelector('#gp-pick').addEventListener('click', () => {
-    const entries = Object.entries(state.personaTemplates || {});
-    if (!entries.length) return;
-    const pickOverlay = modelModalShell({
-      head: '选择人设',
-      body: `<div class="model-modal-right" style="flex:1">
-        ${entries.map(([id, p]) => `
-          <div class="mm-model" data-id="${esc(id)}">
-            <span class="mm-check">${p.text === overlay.querySelector('#gp-roletext').value ? '✓' : ''}</span>
-            <span>${esc(p.name)}</span>
-            <span class="muted" style="font-size:11px">${p.builtin ? '内置' : '自定义'}</span>
-          </div>`).join('')}
-      </div>`,
-      foot: `<button class="btn" id="pp-cancel">取消</button>`
-    });
-    pickOverlay.querySelectorAll('.mm-model').forEach((el) => {
-      el.addEventListener('click', () => {
-        const tpl = state.personaTemplates[el.dataset.id];
-        if (tpl) {
-          overlay.querySelector('#gp-roletext').value = tpl.text;
-          overlay.querySelector('#gp-customrules').value = tpl.customRules || '';
-          overlay.querySelector('#gp-pick').value = tpl.name;
-        }
-        closeModelModal(pickOverlay);
-      });
-    });
-    pickOverlay.querySelector('#pp-cancel').addEventListener('click', () => closeModelModal(pickOverlay));
-  });
-  overlay.querySelector('#gp-new-btn').addEventListener('click', () => {
-    openPersonaCreateModal();
-  });
-
-  overlay.querySelector('#gp-cancel').addEventListener('click', () => closeModelModal(overlay));
-  overlay.querySelector('#gp-save').addEventListener('click', async () => {
-    const patch = {
-      persona: {
-        ...(c.persona || {}),
-        botName: overlay.querySelector('#gp-botname').value.trim() || '小鲸鱼',
-        selfNickname: overlay.querySelector('#gp-selfnick').value.trim(),
-        participation: overlay.querySelector('#gp-participation').value,
-        roleText: overlay.querySelector('#gp-roletext').value.trim(),
-        customRules: overlay.querySelector('#gp-customrules').value.trim(),
-        systemPromptOverride: overlay.querySelector('#gp-sysprompt').value.trim()
-      }
-    };
-    try {
-      await api('/api/config', { method: 'POST', body: JSON.stringify(patch) });
-      closeModelModal(overlay);
-      loadSettings();
-    } catch (e) {
-      alert(`保存全局人设失败：${e.message}`);
-    }
-  });
-}
-
-/**
- * 分会话人设编辑模态框：与统一编辑器同款字段（人设选择/添加/机器人名字沿用全局说明/参与度/
- * 角色设定/附加规则/系统提示词覆盖）。保存按钮直接 POST /api/config 落盘
- * （personaByChat 整体 __replace__），不经过表单自动保存链。
- */
-function openPerChatPersonaModal(chatKey) {
-  const conf = (state.config?.personaByChat || {})[chatKey] || {};
-  const chatName = formatChatTitle(chatKey, chatNameOf(chatKey));
-  const overlay = modelModalShell({
-    head: `${chatName} 的独立人设`,
-    body: `
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="text" id="pcp-pick" readonly placeholder="点击选择人设" value="${esc(conf.roleText ? (Object.values(state.personaTemplates || {}).find((p) => p.text === conf.roleText)?.name || '自定义') : '')}" style="flex:1;cursor:pointer" />
-        <button class="btn btn-small" id="pcp-new-btn">＋ 添加人设</button>
-      </div>
-      <div class="field"><label>参与度（留空跟随全局）</label>
-        <select id="pcp-participation">
-          <option value="" ${!conf.participation ? 'selected' : ''}>跟随全局</option>
-          <option value="low" ${conf.participation === 'low' ? 'selected' : ''}>安静型</option>
-          <option value="medium" ${conf.participation === 'medium' ? 'selected' : ''}>普通群友</option>
-          <option value="high" ${conf.participation === 'high' ? 'selected' : ''}>活跃型</option>
-        </select></div>
-      <div class="field"><label>角色设定（留空跟随全局）</label>
-        <textarea id="pcp-roletext" class="persona-role-text" style="min-height:180px" placeholder="留空 = 用全局人设的角色设定">${esc(conf.roleText || '')}</textarea></div>
-      <div class="field"><label>管理员附加规则（可选）</label>
-        <textarea id="pcp-customrules" style="min-height:80px" placeholder="可选：追加到系统提示的规则（留空 = 用全局）">${esc(conf.customRules || '')}</textarea></div>
-      <div class="field"><label>系统提示词覆盖（高级 · 可选）</label>
-        <textarea id="pcp-sysprompt" style="min-height:80px" placeholder="可选：整体替换系统提示（留空 = 用全局）">${esc(conf.systemPromptOverride || '')}</textarea></div>
-      <div class="hint" style="margin-top:6px">机器人名字/群内展示名不按会话变化（账号身份，改了会与 @ 判定对不上），在统一人设里设置。</div>`,
-    foot: `<button class="btn" id="pcp-clear">清空独立人设</button>
-           <button class="btn" id="pcp-cancel">取消</button>
-           <button class="btn btn-primary" id="pcp-save">保存</button>`
-  });
-
-  // 选择人设：复用人设模板列表
-  overlay.querySelector('#pcp-pick').addEventListener('click', () => {
-    const entries = Object.entries(state.personaTemplates || {});
-    if (!entries.length) return;
-    const pickOverlay = modelModalShell({
-      head: '选择人设',
-      body: `<div class="model-modal-right" style="flex:1">
-        ${entries.map(([id, p]) => `
-          <div class="mm-model" data-id="${esc(id)}">
-            <span class="mm-check">${p.text === overlay.querySelector('#pcp-roletext').value ? '✓' : ''}</span>
-            <span>${esc(p.name)}</span>
-            <span class="muted" style="font-size:11px">${p.builtin ? '内置' : '自定义'}</span>
-          </div>`).join('')}
-      </div>`,
-      foot: `<button class="btn" id="pp-cancel">取消</button>`
-    });
-    pickOverlay.querySelectorAll('.mm-model').forEach((el) => {
-      el.addEventListener('click', () => {
-        const tpl = state.personaTemplates[el.dataset.id];
-        if (tpl) {
-          overlay.querySelector('#pcp-roletext').value = tpl.text;
-          overlay.querySelector('#pcp-customrules').value = tpl.customRules || '';
-          overlay.querySelector('#pcp-pick').value = tpl.name;
-        }
-        closeModelModal(pickOverlay);
-      });
-    });
-    pickOverlay.querySelector('#pp-cancel').addEventListener('click', () => closeModelModal(pickOverlay));
-  });
-  overlay.querySelector('#pcp-new-btn').addEventListener('click', () => {
-    // 复用统一编辑器的添加流程：加完模板直接填进本会话的角色设定
-    openPersonaCreateModal();
-  });
-
-  // 直接 POST 落盘：不走"写隐藏 JSON + 等表单链保存"的老路。
-  // 老路的两个坑（2026-09-17 用户实测）：
-  //   1. modal 挂在 body 下、不在 #settings-form 内，dispatchEvent(change) 冒泡
-  //      到不了 form 的委托监听 —— 从来没触发过自动保存；
-  //   2. 就算触发了，随后的 loadSettings() 重建表单 DOM，隐藏 input 被重渲染成
-  //      GET 回来的旧值，用户刚写的条目被无声丢弃 → 重开 modal 一片空白。
-  const saveToMap = async (entry) => {
-    const current = state.config?.personaByChat || {};
-    const next = { ...current };
-    if (entry) next[chatKey] = entry; else delete next[chatKey];
-    try {
-      const r = await api('/api/config', {
-        method: 'POST',
-        body: JSON.stringify({ personaByChat: { __replace__: next } })
-      });
-      if (r?.config) state.config = r.config;
-    } catch (e) {
-      alert(`保存独立人设失败：${e?.message || e}`);
-      throw e;
-    }
-  };
-
-  overlay.querySelector('#pcp-cancel').addEventListener('click', () => closeModelModal(overlay));
-  overlay.querySelector('#pcp-clear').addEventListener('click', async () => {
-    try { await saveToMap(null); } catch { return; }
-    closeModelModal(overlay);
-    renderSettings();   // 只刷人设区块（按钮上的 ● 标记），不整页重拉 7 个接口
-  });
-  overlay.querySelector('#pcp-save').addEventListener('click', async () => {
-    const roleText = overlay.querySelector('#pcp-roletext').value.trim();
-    const participation = overlay.querySelector('#pcp-participation').value;
-    const customRules = overlay.querySelector('#pcp-customrules').value.trim();
-    const sysPrompt = overlay.querySelector('#pcp-sysprompt').value.trim();
-    if (!roleText && !participation && !customRules && !sysPrompt) {
-      try { await saveToMap(null); } catch { return; }   // 全空 = 清除独立人设
-    } else {
-      const entry = {};
-      if (roleText) entry.roleText = roleText;
-      if (participation) entry.participation = participation;
-      if (customRules) entry.customRules = customRules;
-      if (sysPrompt) entry.systemPromptOverride = sysPrompt;
-      try { await saveToMap(entry); } catch { return; }
-    }
-    closeModelModal(overlay);
-    renderSettings();
-  });
-}
-
-function renderAllowSection(c) {
-  return `
-    <h3 id="settings-allow">聊天白名单</h3>
-    <div class="hint" style="margin-bottom:10px">白名单为空时机器人不会在任何群聊/私聊内运行。</div>
-    <div class="field"><label>从 QQ 账号直接勾选</label>
-      <div class="allow-pick-row">
-        <button class="btn btn-small" id="pick-groups-btn">选择群</button>
-        <button class="btn btn-small" id="pick-friends-btn">选择好友</button>
-        <span id="pick-result" class="muted allow-pick-msg"></span>
-      </div></div>
-    <div class="field-row">
-      <div class="field"><label>允许的群号（逗号分隔）</label><input type="text" id="cfg-allowgroups" value="${esc((c.allow.groups || []).join(','))}" /></div>
-      <div class="field"><label>允许的 QQ（逗号分隔）</label><input type="text" id="cfg-allowprivate" value="${esc((c.allow.private || []).join(','))}" /></div>
-    </div>
-    <div class="checkbox-row"><input type="checkbox" id="cfg-allowallwhenempty" ${c.allowAllWhenEmpty === true ? 'checked' : ''} />
-      <label for="cfg-allowallwhenempty">白名单留空时允许所有会话</label></div>
-    <div class="hint">说明：勾选后，若上方两个列表都为空，机器人会在<b>所有</b>群聊和私聊中运行；只要填了任意一项，就只按名单过滤。</div>
-    <div class="hint" style="margin-top:8px">按会话的独立人设在「人设」页签配置（关闭"统一人设"后出现）。</div>`;
 }
 
 // 表情包积极程度档位：[值, 显示名]
@@ -972,9 +670,38 @@ return `
     </div>`;
 }
 
-function renderDesktopSection(c) {
+/**
+ * 「安全与准入」（全局）：替代旧「聊天白名单」页。
+ *   · acceptAllSessions：唯一准入开关 —— 关闭时只有被添加到会话个性化的会话与机器人交互
+ *   · deny（黑名单）继续全局生效
+ * 一键下线/上线（暂停/恢复）是运行态操作，在顶栏，不属于配置。
+ */
+function renderSecuritySection(c) {
+  const deny = c.deny || {};
   return `
-    <h3>桌面端</h3>
+    <h3 id="settings-security">安全与准入</h3>
+    <p class="setsub">谁来跟机器人说话、哪些 ID 一律拉黑 —— 全局生效，与具体会话无关</p>
+    <div class="checkbox-row"><input type="checkbox" id="cfg-accept-all" ${c.acceptAllSessions === true ? 'checked' : ''} />
+      <label for="cfg-accept-all">接受所有会话（未添加到左侧会话列表的群/私聊也响应，走默认设置）</label></div>
+    <div class="hint" style="margin-top:6px">未勾选时，只有被添加进左侧会话列表的会话才会被服务；
+      在左侧「添加会话」即等于允许该会话。一键全线下线/上线用顶栏的「下线/上线」按钮。</div>
+    <div class="field"><label>群聊黑名单（群号，逗号分隔；留空 = 不拉黑）</label>
+      <input type="text" id="cfg-deny-groups" value="${esc((deny.groups || []).join(','))}" /></div>
+    <div class="field"><label>私聊黑名单（QQ 号，逗号分隔；留空 = 不拉黑）</label>
+      <input type="text" id="cfg-deny-private" value="${esc((deny.private || []).join(','))}" /></div>
+    <div class="hint" style="margin-top:8px">黑名单优先于"接受所有会话"：名单内的 ID 永远不响应、不存档。
+      屏蔽"某个群里的某个群友"请在对应会话的「聊天设置 → 屏蔽名单」里管理（按会话生效）。</div>`;
+}
+
+/**
+ * 「系统与维护」（全局）：原「桌面端」页的功能保留件 —— 页面取消，设置按
+ * 全局归类搬到这里（桌面自启/托盘、界面偏好、数据目录、版本更新）。
+ */
+function renderSystemSection(c) {
+  return `
+    <h3 id="settings-system">系统与维护</h3>
+    <p class="setsub">进程行为 / 界面偏好 / 数据管理 / 版本更新 —— 全机生效</p>
+    <h3 style="margin-top:4px">进程</h3>
     <div class="checkbox-row"><input type="checkbox" id="cfg-autostart" ${c.server?.autoStart ? 'checked' : ''} />
       <label for="cfg-autostart">开机自启</label></div>
     <div class="checkbox-row"><input type="checkbox" id="cfg-closetray" ${c.server?.closeToTray !== false ? 'checked' : ''} />
@@ -1013,34 +740,31 @@ function renderDesktopSection(c) {
       </div></div>`;
 }
 
-function renderOnebotSection(c) {
-  return `
-    <h3 id="settings-onebot">OneBot（SnowLuma）</h3>
-    <div class="hint" style="margin-bottom:10px">SnowLuma 的启动、关闭与日志已移动到顶部「SnowLuma」页签。此处只保留连接配置。</div>
-    <div class="field"><label>SnowLuma 程序目录（留空 = 自动使用项目内 snowluma/ 文件夹）</label>
-      <div style="display:flex;gap:8px">
-        <input type="text" id="cfg-snowlumadir" value="${esc(c.snowluma.dir || '')}" style="flex:1" />
-        <button class="btn btn-small" id="open-snowluma-btn">打开文件夹</button>
-      </div>
-      <div class="hint" id="snowluma-hint"></div></div>
-    <div class="checkbox-row"><input type="checkbox" id="cfg-snowlumalaunch" ${c.snowluma.autoLaunch ? 'checked' : ''} />
-      <label for="cfg-snowlumalaunch">QQ Agent 启动时自动拉起 SnowLuma（未运行时）</label></div>
-    <div class="field-row">
-      <div class="field"><label>WebSocket 地址（收消息）</label><input type="text" id="cfg-wsurl" value="${esc(c.snowluma.wsUrl)}" /></div>
-      <div class="field"><label>HTTP 地址（发消息）</label><input type="text" id="cfg-httpurl" value="${esc(c.snowluma.httpUrl)}" /></div>
-      <div class="field"><label>WebSocket 令牌</label>
-        <div style="display:flex;gap:8px">
-          <input type="password" id="cfg-obtoken" value="${esc(c.snowluma?.hasAccessToken ? '******' : '')}" placeholder="输入新令牌可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
-          <button class="btn btn-small" id="cfg-obtoken-toggle" type="button">显示</button>
-        </div></div>
-      <div class="field"><label>HTTP 令牌（与 WS 不同时填；SnowLuma 默认分开）</label>
-        <div style="display:flex;gap:8px">
-          <input type="password" id="cfg-obhttptoken" value="${esc(c.snowluma?.hasHttpAccessToken ? '******' : '')}" placeholder="输入新令牌可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
-          <button class="btn btn-small" id="cfg-obhttptoken-toggle" type="button">显示</button>
-        </div></div>
+/** SnowLuma 页的「连接配置」卡片：全局字段，供 03-snowluma.js 渲染时引用。 */
+const SNOWLUMA_CONNECT_FORM = (c) => `
+  <div class="field"><label>SnowLuma 程序目录（留空 = 自动使用项目内 snowluma/ 文件夹）</label>
+    <div style="display:flex;gap:8px">
+      <input type="text" id="cfg-snowlumadir" value="${esc(c.snowluma.dir || '')}" style="flex:1" />
+      <button class="btn btn-small" id="open-snowluma-btn">打开文件夹</button>
     </div>
-    <div class="hint">改完 OneBot 地址需要重启应用生效；模型/人设/白名单即时生效。</div>`;
-}
+    <div class="hint" id="snowluma-hint"></div></div>
+  <div class="checkbox-row"><input type="checkbox" id="cfg-snowlumalaunch" ${c.snowluma.autoLaunch ? 'checked' : ''} />
+    <label for="cfg-snowlumalaunch">QQ Agent 启动时自动拉起 SnowLuma（未运行时）</label></div>
+  <div class="field-row">
+    <div class="field"><label>WebSocket 地址（收消息）</label><input type="text" id="cfg-wsurl" value="${esc(c.snowluma.wsUrl)}" /></div>
+    <div class="field"><label>HTTP 地址（发消息）</label><input type="text" id="cfg-httpurl" value="${esc(c.snowluma.httpUrl)}" /></div>
+    <div class="field"><label>WebSocket 令牌</label>
+      <div style="display:flex;gap:8px">
+        <input type="password" id="cfg-obtoken" value="${esc(c.snowluma?.hasAccessToken ? '******' : '')}" placeholder="输入新令牌可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
+        <button class="btn btn-small" id="cfg-obtoken-toggle" type="button">显示</button>
+      </div></div>
+    <div class="field"><label>HTTP 令牌（与 WS 不同时填；SnowLuma 默认分开）</label>
+      <div style="display:flex;gap:8px">
+        <input type="password" id="cfg-obhttptoken" value="${esc(c.snowluma?.hasHttpAccessToken ? '******' : '')}" placeholder="输入新令牌可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
+        <button class="btn btn-small" id="cfg-obhttptoken-toggle" type="button">显示</button>
+      </div></div>
+  </div>
+  <div class="hint">改完连接配置需要重启应用生效；其余设置即时生效。</div>`;
 
 /**
  * 刷新 Skill 状态（后端判定结果）。
@@ -1052,7 +776,12 @@ function renderOnebotSection(c) {
  */
 async function loadSkillsStatus() {
   try {
-    const data = await api('/api/skills');
+    // 会话作用域下必须按会话取：enabled 是"该会话的生效值"，
+    // 拉全局会把会话级开关显示成全局默认（看起来像点了没生效）。
+    const scope = (typeof isSessionScope === 'function' && isSessionScope())
+      ? `?chat=${encodeURIComponent(state.settingsScope)}`
+      : '';
+    const data = await api(`/api/skills${scope}`);
     state.skills = data.skills || [];
     state.skillsSummary = data.summary || {};
     state.uninstalledSkills = data.uninstalled || [];
@@ -1429,8 +1158,9 @@ function renderModulePage(kind) {
       </div>
       <div class="hint" style="margin-bottom:14px">
         ${meta.lead}<br />
-        开关只有这一处 —— 关闭后它注册的工具、提供的能力、提示词片段和请求改写会**同时**失效。
-        不可用时下面会直接写明原因（未启用 / 缺依赖 / 模型不支持 / 加载失败）。
+        这里的开关是**全局默认** —— 关闭后它注册的工具、提供的能力、提示词片段和请求改写会**同时**失效。
+        不可用时下面会直接写明原因（未启用 / 缺依赖 / 模型不支持 / 加载失败）。<br />
+        只想让某个群/私聊用它：到「会话管理 → 选中会话 → 设置 → 工具与技能」里单独开。
       </div>
       ${sections}
       ${uninstalledHtml}
@@ -1631,12 +1361,40 @@ function renderToolsSection(c) {
   // autoFoldSettings 会按 h3 把整页重包成折叠卡，再把 .fold-head 绑到
   // 分类头上 —— 点分类会开合整块面板，grid-rows 折叠把下半屏撑出大片空白。
   const fold = (typeof setCard === 'function') ? setCard : (o) => `<div class="setcard">${o.body}</div>`;
+  // 会话级技能/插件开关：文件全局一份，启停按会话记（profile overrides）。
+  // 「默认会话」= 全局默认，影响所有没单独配置的会话。
+  const scopeLabel = isSessionScope() ? '本会话' : '默认会话';
+  const moduleRows = (state.skills || []).map((s) => {
+    const loaded = s.loaded !== false;
+    const kindLabel = s.kind === 'plugin' ? '插件' : '技能';
+    const reason = loaded ? '' : `<span class="tool-dep-warn">未加载</span>`;
+    return `
+      <div class="skill-scope-row">
+        <div class="skill-scope-name">
+          <b>${esc(s.name || s.id)}</b>
+          <span class="muted">${kindLabel} · ${esc(s.id)}</span>${reason}
+        </div>
+        <label class="switch tool-switch" title="${loaded ? `只对${scopeLabel}生效` : '该扩展未成功加载，无法启用'}">
+          <input type="checkbox" class="skill-scope-toggle" data-skill-id="${esc(s.id)}"
+                 ${s.enabled ? 'checked' : ''} ${loaded ? '' : 'disabled'} />
+          <span class="track"><span class="thumb"></span></span>
+        </label>
+      </div>`;
+  }).join('') || '<div class="hint">还没有安装技能或插件。</div>';
   return `
     <h3 id="settings-tools">工具与技能</h3>
     <div class="hint" style="margin-bottom:12px">
       打开开关启用机器人可调用的工具。关闭后模型将无法使用该功能。
       ${toolsCfg.enabled === false ? '<span style="color:var(--red)">⚠️ 全局开关已关闭，所有工具均不可用</span>' : ''}
     </div>
+    ${fold({
+      id: 'card-skill-scope',
+      icon: '🧩',
+      title: `${scopeLabel}启用的技能与插件`,
+      sub: '只影响当前作用域；扩展文件仍是全局一份',
+      open: true,
+      body: moduleRows
+    })}
     ${fold({
       id: 'card-tools-list',
       icon: '🛠',
@@ -1699,3 +1457,5 @@ async function refreshPromptPreview(overrides = null) {
     pre.textContent = renderPromptPreviewText();
   });
 }
+
+
