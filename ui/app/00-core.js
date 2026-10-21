@@ -610,7 +610,15 @@ async function api(path, options = {}) {
     ...(keepalive ? { keepalive: true } : {})
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    let msg = data.error || `HTTP ${res.status}`;
+    // 前端是磁盘上的最新文件、后端却还是旧进程时，新接口会落到"未知 API"。
+    // 这不是用户操作问题 —— 把"重启服务"的提示直接附在错误里，别让人去猜。
+    if (res.status === 404 && /未知 API/.test(msg)) {
+      msg += '（后端服务可能还是旧版本进程，请重启 QQ Agent 后再试）';
+    }
+    throw new Error(msg);
+  }
   return data;
 }
 
