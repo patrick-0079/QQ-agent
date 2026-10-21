@@ -1207,7 +1207,13 @@ async function saveConfig({ quiet = false } = {}) {
     const node = el(sel);
     return node ? node.checked : fallback;
   };
-  const sec = state.settingsSection || 'api';
+  // 会话视图（含默认设置）的分区是 persona/memory/chat/tools，与全局设置页的
+  // settingsSection（api/search/...）不是同一套状态。之前这里恒读
+  // state.settingsSection，导致会话人设/记忆/聊天改动的自动保存去读了 api 分支，
+  // 机器人名字等字段根本没进 patch —— 表现就是“改完不保存”。
+  const sec = state.settingsView === 'session'
+    ? (typeof sessionSectionNow === 'function' ? sessionSectionNow() : (state.sessionSection || 'persona'))
+    : (state.settingsSection || 'api');
 
   const patch = {};
 

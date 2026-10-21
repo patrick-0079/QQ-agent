@@ -529,6 +529,29 @@ await c.check('仓库卡片点击可复制名称', async () => {
   if (!doc.querySelector('.mini-toast.show')) throw new Error('复制后没有轻提示');
 });
 
+await c.check('人设：机器人名字修改后能自动保存（回归）', async () => {
+  const doc = window.document;
+  window.switchTab('chatmanage');
+  await sleep(500);
+  const def = doc.querySelector('#chat-default-item');
+  if (def) { def.click(); await sleep(600); }
+  window.switchCmSub('settings');
+  await sleep(800);
+  doc.querySelector('[data-session-section="persona"]')?.click();
+  await sleep(500);
+  const input = doc.querySelector('#cfg-botname');
+  if (!input) throw new Error('默认设置里找不到机器人名字输入框');
+  const before = input.value;
+  input.value = '自动化改名';
+  input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await sleep(1200);
+  const cfg = await window.api('/api/config');
+  if (cfg.persona?.botName !== '自动化改名') throw new Error(`机器人名字没保存，实际 ${cfg.persona?.botName}`);
+  input.value = before;
+  input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await sleep(800);
+});
+
 await ctx.teardown();
 try { window.close(); } catch { /* ignore */ }
 try { dom.window.close(); } catch { /* ignore */ }
