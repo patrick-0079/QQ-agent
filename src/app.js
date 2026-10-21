@@ -1043,6 +1043,18 @@ export function createApp({ log = console.log } = {}) {
     if (event.post_type === 'notice' && event.notice_type === 'notify' && event.sub_type === 'poke') {
       return ingestPoke(event);
     }
+    // 好友/入群申请：OneBot 的 request 事件转给能力提供方（friend-approval / share-card）。
+    if (event.post_type === 'request') {
+      const cap = event.request_type === 'group' ? 'group.request' : 'friend.request';
+      const providers = skillManager.getCapabilityProviders(cap, {});
+      if (!providers.length) return;
+      try {
+        await providers[0].fn({ event, onebot, sender });
+      } catch (error) {
+        log(`[request] ${cap} 处理失败：${error?.message ?? error}`);
+      }
+      return;
+    }
     // 撤回事件：群撤回 group_recall / 好友撤回 friend_recall
     // 用户撤回的消息，后续会话不再发给大模型（从存档里标记/删除）。
     if (event.post_type === 'notice' && (event.notice_type === 'group_recall' || event.notice_type === 'friend_recall')) {
@@ -1610,7 +1622,7 @@ export function createApp({ log = console.log } = {}) {
     // 记录重扫前已注册的 id：运行时新放进来的目录（即使配置里残留了旧记录）
     // 也要按“新装默认关闭”处理，见下方 2026-10-21 加固。
     const beforeIds = new Set(skillManager.registry.list().map((s) => s.manifest?.id).filter(Boolean));
-    const result = await loadPlugins({ log });
+    const result = await loadPlugins({ log, runtime: { sender } });
     // 2026-10-21：**新落地**的技能/插件默认不启用 —— 无论从市场装、手工放目录，
     // 还是配置里残留了同名 id 的 enabled:true，都等用户显式打开。
     const skillsCfgNow = getGlobalConfig()?.skills || {};

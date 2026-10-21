@@ -1247,10 +1247,12 @@ export class Orchestrator {
       // 等等都保留正常循环），这里只负责把现场信息递过去。
       // 插件没启用 / localPolicy 没开时该项为 false，行为与没有这套机制一致。
       if (!finish) {
-        const policyFn = this.#capFirst('reply.local-policy', skillContext);
-        if (policyFn) {
+        // 可能有多个提供方（auto-finish / silent-voice-check），逐个询问；
+        // 以前 #capFirst 只取第一个，两个都启用时后一个静默失效。
+        for (const provider of skillManager.getCapabilityProviders('reply.local-policy', skillContext)) {
+          if (finish) break;
           try {
-            const r = policyFn({
+            const r = await provider.fn({
               api: cfg.api || {},
               entries: triggerEntries,
               batch: {
