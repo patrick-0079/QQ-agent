@@ -363,8 +363,8 @@ const ctx = vm.createContext(sandbox);
     console.log('  FAIL  空列表搜索框检查抛错: ' + (e && e.message));
   }
 
-  // ── 会话设置：技能/插件两个独立分区，各自带搜索 ──────────────────────
-  console.log('\n=== 会话级技能/插件分区 + 搜索 ===');
+  // ── 会话设置：技能/插件两个独立分区，各自带搜索 + 启用状态筛选 ──────────
+  console.log('\n=== 会话级技能/插件分区 + 搜索 + 启用状态筛选 ===');
   try {
     const fn = ctx.renderToolsSection || sandbox.renderToolsSection;
     if (typeof fn !== 'function') throw new Error('renderToolsSection 未定义');
@@ -374,6 +374,14 @@ const ctx = vm.createContext(sandbox);
     const ok = hasSkillCard && hasPluginCard;
     ok ? pass++ : fail++;
     console.log(`  ${ok ? 'OK   ' : 'FAIL '} 技能/插件拆成两个分区且各带搜索（技能=${hasSkillCard} 插件=${hasPluginCard}）`);
+    // 筛选条件：两个分区各有 全部 / 已启用 / 已关闭
+    const filterCount = (mode) => (html.match(new RegExp(`data-scope-filter="${mode}"`, 'g')) || []).length;
+    const filterOk = filterCount('all') === 2 && filterCount('on') === 2 && filterCount('off') === 2
+      && html.includes('data-enabled="1"') && html.includes('data-enabled="0"')
+      && html.includes('aria-pressed="true"');
+    filterOk ? pass++ : fail++;
+    console.log(`  ${filterOk ? 'OK   ' : 'FAIL '} 两个分区各有「全部/已启用/已关闭」条件且行带启用状态`
+      + `（all=${filterCount('all')} on=${filterCount('on')} off=${filterCount('off')}）`);
   } catch (e) {
     fail++;
     console.log('  FAIL  会话级技能/插件分区检查抛错: ' + (e && e.message));

@@ -30,6 +30,42 @@ function flushSettingsSaves() {
   }
 }
 
+// ── 会话级技能/插件分区：按启用状态筛选 ────────────────────────────────
+// 每个分区（技能 / 插件）有「全部 / 已启用 / 已关闭」三个条件，与搜索框叠加。
+// 只在 DOM 内改 display：不重渲染，打字不丢焦点，也不打断开关状态。
+function scopeFilterCard(el) {
+  return el && el.closest ? el.closest('.setcard') : null;
+}
+
+function applyScopeFilter(card) {
+  if (!card) return;
+  const group = card.querySelector('.scope-filter');
+  if (!group) return;
+  const activeBtn = group.querySelector('.scope-filter-btn[data-active="true"]');
+  const mode = activeBtn?.dataset.scopeFilter || 'all';
+  const input = card.querySelector('.scope-search');
+  const q = input ? String(input.value || '').trim().toLowerCase() : '';
+  let total = 0;
+  let shown = 0;
+  card.querySelectorAll('.skill-scope-row').forEach((row) => {
+    total++;
+    const enabled = row.dataset.enabled === '1';
+    const stateHit = mode === 'all' || (mode === 'on' ? enabled : !enabled);
+    const hit = stateHit && (!q || (row.dataset.search || '').includes(q));
+    row.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  const empty = card.querySelector('.scope-empty');
+  if (empty) {
+    const kindLabel = group.dataset.kindLabel || '条目';
+    empty.textContent = mode === 'on' ? `没有已启用的${kindLabel}。`
+      : mode === 'off' ? `没有已关闭的${kindLabel}。`
+        : q ? `没有匹配的${kindLabel}。` : `没有${kindLabel}。`;
+    // 一个条目都没有时 .scope-list 里已有"还没有安装"提示，这里不再叠一句
+    empty.style.display = (total > 0 && shown === 0) ? '' : 'none';
+  }
+}
+
 function bindSettingsEvents(c) {
   /* ── 即时保存：任何设置项变动 → 防抖 600ms 自动保存 ──
      变动的设置块背景变成流动的浅黄色渐变（.dirty-glow）。
@@ -241,22 +277,32 @@ function bindSettingsEvents(c) {
     });
   });
 
-  // ── 会话级技能/插件搜索（两个分区各一个）──
-  // 只在 DOM 内筛行：不重渲染，避免打字时丢焦点/打断开关状态。
-  $$('.scope-search').forEach((input) => {
-    input.addEventListener('input', () => {
-      const card = input.closest('.setcard');
-      if (!card) return;
-      const q = input.value.trim().toLowerCase();
-      let shown = 0;
-      card.querySelectorAll('.skill-scope-row').forEach((row) => {
-        const hit = !q || (row.dataset.search || '').includes(q);
-        row.style.display = hit ? '' : 'none';
-        if (hit) shown++;
+  // ── 会话级技能/插件筛选（两个分区，搜索 + 启用状态叠加）──
+  // 条件按钮：只改 DOM 显示，不重渲染；选中项写进 state.scopeFilter 供重绘后回填。
+  $$('.scope-filter').forEach((group) => {
+    const card = scopeFilterCard(group);
+    group.querySelectorAll('.scope-filter-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.scopeFilter || 'all';
+        const key = group.dataset.scopeKey;
+        if (key) {
+          state.scopeFilter = state.scopeFilter || {};
+          state.scopeFilter[key] = mode;
+        }
+        group.querySelectorAll('.scope-filter-btn').forEach((other) => {
+          const on = other === btn;
+          other.dataset.active = on ? 'true' : 'false';
+          other.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        applyScopeFilter(card);
       });
-      const empty = card.querySelector('.scope-empty');
-      if (empty) empty.style.display = (q && shown === 0) ? '' : 'none';
     });
+    // 重绘后立刻按已选条件筛一遍（条件跨重绘保留）
+    applyScopeFilter(card);
+  });
+  // 搜索框：与启用状态条件叠加生效
+  $$('.scope-search').forEach((input) => {
+    input.addEventListener('input', () => applyScopeFilter(scopeFilterCard(input)));
   });
 
   // 单个工具开关

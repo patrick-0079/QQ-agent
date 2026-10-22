@@ -1431,16 +1431,29 @@ function renderToolsSection(c) {
   const fold = (typeof setCard === 'function') ? setCard : (o) => `<div class="setcard">${o.body}</div>`;
   // 会话级技能/插件开关：文件全局一份，启停按会话记（profile overrides）。
   // 「默认会话」= 全局默认，影响所有没单独配置的会话。
-  // 技能与插件拆成两个独立分区，各自带搜索（不再混在一张长列表里）。
+  // 技能与插件拆成两个独立分区，各自带搜索 +「全部 / 已启用 / 已关闭」筛选
+  // （不再混在一张长列表里，也不必靠肉眼在几十条里找还开着的那些）。
   const scopeLabel = isSessionScope() ? '本会话' : '默认设置';
+  // 选中项存 state.scopeFilter（键 = 分区 key）：开关切换会整页重绘，
+  // 条件必须活下来，否则用户每点一次开关就得重新选一遍筛选。
+  const scopeFilterOf = (key) => {
+    const v = (state.scopeFilter || {})[key];
+    return v === 'on' || v === 'off' ? v : 'all';
+  };
   const moduleCard = ({ key, kindLabel, list }) => {
+    const onCount = list.filter((s) => s.enabled === true).length;
+    const offCount = list.length - onCount;
+    const filter = scopeFilterOf(key);
+    const filterBtn = (mode, label, count) => `<button type="button" class="btn btn-small scope-filter-btn"
+        data-scope-filter="${mode}" data-active="${filter === mode ? 'true' : 'false'}"
+        aria-pressed="${filter === mode ? 'true' : 'false'}" data-no-autosave>${label}<span class="scope-filter-count">${count}</span></button>`;
     const rows = list.map((s) => {
       const loaded = s.loaded !== false;
       const on = s.enabled === true;
       const reason = loaded ? '' : '<span class="tool-dep-warn">未加载</span>';
       const hay = [s.id, s.name, s.description, s.category].filter(Boolean).join(' ').toLowerCase();
       return `
-        <div class="skill-scope-row" data-search="${esc(hay)}">
+        <div class="skill-scope-row" data-search="${esc(hay)}" data-enabled="${on ? '1' : '0'}">
           <div class="skill-scope-name">
             <b>${esc(s.name || s.id)}</b>
             <span class="muted">${kindLabel} · ${esc(s.id)}</span>${reason}
@@ -1453,7 +1466,6 @@ function renderToolsSection(c) {
           </label>
         </div>`;
     }).join('');
-    const onCount = list.filter((s) => s.enabled === true).length;
     return fold({
       id: `card-scope-${key}`,
       icon: key === 'skills' ? '🧩' : '🔌',
@@ -1461,9 +1473,13 @@ function renderToolsSection(c) {
       sub: `已启用 ${onCount} / 共 ${list.length}${isSessionScope() ? '' : '（影响所有未单独配置的会话）'}`,
       open: true,
       body: `
-        <div class="scope-search-row">
+        <div class="scope-filter-row">
           <input type="search" class="scope-search" id="scope-search-${key}" data-no-autosave
                  placeholder="搜索${kindLabel}名称 / id / 简介…" autocomplete="off" />
+          <div class="scope-filter" role="group" data-scope-key="${key}" data-kind-label="${kindLabel}"
+               aria-label="按启用状态筛选${kindLabel}">
+            ${filterBtn('all', '全部', list.length)}${filterBtn('on', '已启用', onCount)}${filterBtn('off', '已关闭', offCount)}
+          </div>
         </div>
         <div class="scope-list">${rows || `<div class="hint">还没有安装${kindLabel}，可到「${kindLabel}仓库」添加。</div>`}</div>
         <div class="hint scope-empty" style="display:none">没有匹配的${kindLabel}。</div>`

@@ -618,7 +618,10 @@ const state = {
   consolidateResult: {}, // chatKey -> { note, at, failed? }
   // 提示词预览缓存（GET /api/prompt-preview）：按当前启停状态组装的系统提示 + 可用工具。
   // 设置-工具页与技能页右侧共用；开关变动后 refreshPromptPreview() 拉新并原地替换 DOM。
-  promptPreview: null
+  promptPreview: null,
+  // 会话管理 → 设置 → 工具与技能：技能/插件分区的启用状态筛选（'all' | 'on' | 'off'）。
+  // 存在 state 而不是只存 DOM：切换开关会整页重绘，筛选条件要活下来。
+  scopeFilter: { skills: 'all', plugins: 'all' }
 };
 
 // ── 工具函数 ──
