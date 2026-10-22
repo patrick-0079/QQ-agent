@@ -906,7 +906,7 @@ function renderSkillSettingsModal(skill) {
     } else {
       input = `<input type="${isSecret ? 'password' : 'text'}" id="${id}" data-key="${esc(key)}" data-type="string" value="${isSecret ? '' : esc(v)}" placeholder="${isSecret ? (v ? '已设置（留空 = 不修改）' : '未设置') : ''}" autocomplete="off" />`;
     }
-    return `<div class="${cls}"><label>${label}${d.secret ? ' 🔒' : ''}</label>${input}${hint}</div>`;
+    return `<div class="${cls}"><label>${label}${d.required ? ' <span class="req">*</span>' : ''}${d.secret ? ' 🔒' : ''}</label>${input}${hint}</div>`;
   };
 
   return { html: `<div class="modal skill-modal" role="dialog" aria-modal="true" aria-label="${esc(skill.name)} 设置">
@@ -970,6 +970,16 @@ function openSkillSettings(skillId) {
   });
 
   overlay.querySelector('#skset-save').addEventListener('click', async () => {
+    const schema = skill.configSchema || {};
+    const missing = [...overlay.querySelectorAll('[data-key]')].filter((el) => {
+      const d = schema[el.dataset.key] || {};
+      if (!d.required || d.type === 'boolean') return false;
+      return String(el.value ?? '').trim() === '';
+    });
+    if (missing.length) {
+      alert(`必填项不能为空：${missing.map((el) => schema[el.dataset.key]?.label || el.dataset.key).join('、')}`);
+      return;
+    }
     const settings = {};
     overlay.querySelectorAll('[data-key]').forEach((el) => {
       const key = el.dataset.key;

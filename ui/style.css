@@ -2073,3 +2073,6 @@ details.collapsible.coll-shut > summary::after { transform: rotate(0deg); }
 .settings-undo-btn { position: relative; z-index: 3; margin-bottom: 8px; }
 
 .ac-trigger-item:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+
+/* 必填项标记（技能设置弹窗） */
+.skill-form .req { color: #e5484d; font-weight: 700; margin-left: 2px; }
