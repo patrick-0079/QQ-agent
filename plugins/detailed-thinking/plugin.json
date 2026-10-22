@@ -1,0 +1,22 @@
+{
+  "id": "detailed-thinking",
+  "name": "更详细的会话思考",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "model",
+  "description": "把每轮模型的原生推理内容写入会话页，便于查看深度思考过程。",
+  "author": "QQ Agent",
+  "enabledByDefault": false,
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "maxChars": 0
+  },
+  "configSchema": {
+    "maxChars": {
+      "type": "number",
+      "label": "单轮上限（字符）",
+      "description": "0 = 不限制（默认）。设成正数后，超出的推理内容会截断并标注。"
+    }
+  }
+}

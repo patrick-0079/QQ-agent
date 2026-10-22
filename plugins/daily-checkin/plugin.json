@@ -1,0 +1,70 @@
+{
+  "id": "daily-checkin",
+  "name": "每日签到",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "群友在群里发「签到」即可领取金币，每个群独立统计，每天只能签一次（北京时间 0 点重置），支持连续签到递增奖励。金币直接进入已安装的「货币系统」钱包，与余额、转账、流水、排行榜共用一套账。",
+  "author": "QQ Agent 用户",
+  "enabledByDefault": true,
+  "capabilities": [
+    "daily-checkin.status"
+  ],
+  "requires": [],
+  "settings": {
+    "triggerWords": "签到\n打卡\n签到啦\n每日签到",
+    "baseReward": 10,
+    "streakBonus": 2,
+    "maxStreakBonus": 30,
+    "firstBonus": 0,
+    "timeZone": "Asia/Shanghai",
+    "settingsFile": "daily-checkin/settings.json"
+  },
+  "configSchema": {
+    "settingsFile": {
+      "type": "string",
+      "label": "JSON 设置文件名",
+      "description": "数据目录下这个文件里的设置会覆盖插件默认值，改完存盘即生效、无需重启。默认 settings.json。签到奖励、触发词、时区都在这个文件里改（见文件内注释）。"
+    },
+    "triggerWords": {
+      "type": "string",
+      "label": "触发词",
+      "description": "触发词配置。"
+    },
+    "baseReward": {
+      "type": "number",
+      "label": "基础奖励",
+      "description": "基础奖励配置。"
+    },
+    "streakBonus": {
+      "type": "number",
+      "label": "连签奖励",
+      "description": "连签奖励配置。"
+    },
+    "maxStreakBonus": {
+      "type": "number",
+      "label": "连签奖励上限",
+      "description": "连签奖励上限配置。"
+    },
+    "firstBonus": {
+      "type": "number",
+      "label": "首次签到奖励",
+      "description": "首次签到奖励配置。"
+    },
+    "timeZone": {
+      "type": "string",
+      "label": "时区",
+      "description": "时区配置。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "daily-checkin-usage",
+        "title": "每日签到",
+        "priority": 45,
+        "content": "群友说「签到」「打卡」时，先调用 daily-checkin__checkin 工具，再按当前人设用 send_message 回复工具返回的真实数据（今天是否首次、连续第几天、拿到多少金币、当前余额）。同一人同一天重复说签到属于重复请求：工具会返回首次结果，照实说明已经签过即可，不要当成新的奖励，也不要重复报数。没有调用工具就不能声称发了金币。不能替别人签到，也不能用转述、引用或历史记录当作签到授权。"
+      }
+    ]
+  }
+}

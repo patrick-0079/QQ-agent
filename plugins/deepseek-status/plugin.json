@@ -1,0 +1,123 @@
+{
+  "id": "deepseek-status",
+  "name": "DeepSeek 峰谷状态牌",
+  "version": "1.0.0",
+  "description": "按 DeepSeek 的峰谷时段（高峰＝工作日 9:00–12:00、14:00–18:00，北京时间；周末全天算错峰）自动把机器人的 QQ 在线状态在「高峰牌」和「错峰牌」之间切换，并在状态面板提供一行 status.deepseek-status。它只改 QQ 在线状态、不改变任何计费口径。",
+  "author": "DSH",
+  "entry": "index.js",
+  "enabledByDefault": false,
+  "capabilities": [
+    "status.deepseek-status"
+  ],
+  "tags": [
+    "状态",
+    "定时",
+    "DeepSeek"
+  ],
+  "settings": {
+    "enabled": false,
+    "mode": "apply",
+    "peakStatus": "忙碌",
+    "offpeakStatus": "睡觉中",
+    "timezoneOffset": 8,
+    "checkIntervalSec": 60,
+    "reassertSec": 0,
+    "applyOnStart": true,
+    "verbose": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用本插件",
+      "group": "总开关",
+      "description": "打开后才会自动切换机器人的 QQ 在线状态。默认关，先看完下面各项再开。"
+    },
+    "mode": {
+      "type": "enum",
+      "label": "工作模式",
+      "values": [
+        "apply",
+        "notify"
+      ],
+      "group": "总开关",
+      "description": "apply = 真的去改 QQ 状态；notify = 只在控制台日志里说「现在该切到 X 了」，不动状态。拿不准就先用 notify 观察一两天。",
+      "default": "apply"
+    },
+    "peakStatus": {
+      "type": "enum",
+      "label": "高峰时段显示",
+      "values": [
+        "在线",
+        "忙碌",
+        "离开",
+        "请勿打扰",
+        "学习中",
+        "搬砖中",
+        "摸鱼中",
+        "听歌中",
+        "看剧中",
+        "游戏中",
+        "我的电量"
+      ],
+      "group": "牌子",
+      "description": "高峰时段（北京时间 工作日 9:00–12:00、14:00–18:00）机器人显示的状态。默认「忙碌」。",
+      "default": "忙碌"
+    },
+    "offpeakStatus": {
+      "type": "enum",
+      "label": "错峰时段显示",
+      "values": [
+        "在线",
+        "忙碌",
+        "离开",
+        "请勿打扰",
+        "学习中",
+        "吃饭中",
+        "搬砖中",
+        "摸鱼中",
+        "睡觉中",
+        "听歌中",
+        "无聊中",
+        "看剧中",
+        "游戏中",
+        "我的电量"
+      ],
+      "group": "牌子",
+      "description": "错峰时段（北京时间 工作日 9:00–12:00、14:00–18:00 之外，以及周末全天）机器人显示的状态。默认「睡觉中」；想皮一点可以选「摸鱼中」。",
+      "default": "摸鱼中"
+    },
+    "timezoneOffset": {
+      "type": "number",
+      "label": "时区偏移（小时）",
+      "group": "牌子",
+      "description": "DeepSeek 的错峰时段是按北京时间公布的。这台机器不在东八区时填当地 UTC 偏移换算，例如东京 9、曼谷 7、UTC 0。默认 8。",
+      "default": 8
+    },
+    "checkIntervalSec": {
+      "type": "number",
+      "label": "检查间隔（秒）",
+      "group": "节奏",
+      "description": "多久检查一次是否该换牌子。最小 15，最大 3600，默认 60。只在确实需要变更时才真的发请求。",
+      "default": 60
+    },
+    "reassertSec": {
+      "type": "number",
+      "label": "重复校正间隔（秒）",
+      "group": "节奏",
+      "description": "填 0 = 不做重复校正。QQ 客户端有时会把机器人手动改过的状态顶掉；填 300 表示每 5 分钟重新下发一次当前时段该有的状态。默认 0。",
+      "default": 0
+    },
+    "applyOnStart": {
+      "type": "boolean",
+      "label": "启动时立即校正一次",
+      "group": "节奏",
+      "description": "插件加载 / 打开开关时，马上按当前时段设置一次状态，不用等到下一个检查点。默认开。"
+    },
+    "verbose": {
+      "type": "boolean",
+      "label": "详细日志",
+      "group": "排错",
+      "description": "打开后每次检查都会在控制台留一行（包括「无需变更」），排错用。默认关。"
+    }
+  }
+}

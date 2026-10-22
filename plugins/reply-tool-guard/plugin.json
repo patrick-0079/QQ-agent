@@ -1,0 +1,21 @@
+{
+  "id": "reply-tool-guard",
+  "name": "发言工具督促",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "category": "message",
+  "description": "要求模型使用工具完成回应；只思考未调用工具时最多督促两轮，明确要求模型自己调用 send_message，绝不转发普通正文。",
+  "permissions": [],
+  "requires": [],
+  "capabilities": ["llm.request-params", "llm.retry-advisor"],
+  "settings": {},
+  "prompt": {
+    "sections": [{
+      "id": "use-real-send-tool",
+      "priority": 90,
+      "content": "发言执行规则：思考完成且需要回应时，必须真正调用 send_message，并把只给群友看的回复放入 messages 参数。不要用普通正文、[SEND]、[PAUSE]、[STICKER]、XML 或伪造工具 JSON 代替调用。思考、备注、QQ号记录不能混进消息。无需回应时调用 finish，不要用一段思考作为会话结束。如果收到发言督促工具的提醒，下一步直接调用 send_message，不再进行无关查询或复述思考。"
+    }]
+  }
+}

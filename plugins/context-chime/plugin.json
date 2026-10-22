@@ -1,0 +1,158 @@
+{
+  "id": "context-chime",
+  "name": "上下文插话判定",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "让机器人在没被 @ 的时候也能按上下文决定要不要接话：每条够长的群消息先用一次极短的模型调用判断「这句有没有机器人的戏份」，判定要接才开正式会话。不装或关掉本插件时，行为与原生完全一致（纯 @ / 关键词 / 随机档）。",
+  "author": "本机定制",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": true,
+  "capabilities": ["reply.interest-judge"],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "cooldownSec": 12,
+    "minChars": 4,
+    "windowSize": 14,
+    "judgeProbability": 100,
+    "dailyCallLimit": 400,
+    "confidenceThreshold": 0,
+    "allowPrivate": false,
+    "onlyGroups": "",
+    "denyGroups": "",
+    "judgeModel": "",
+    "judgeProvider": "",
+    "maxTokens": 64,
+    "timeoutMs": 6000,
+    "promptExtra": ""
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用上下文插话判定",
+      "description": "关掉后：没被 @ 时只按原生档位走（关键词/随机），不再有模型判定这一步。"
+    },
+    "cooldownSec": {
+      "type": "number",
+      "label": "同群判定冷却（秒）",
+      "description": "同一个群两次判定之间至少隔多少秒，防止刷屏式判定。默认 12。",
+      "min": 0,
+      "max": 600,
+      "step": 1
+    },
+    "minChars": {
+      "type": "number",
+      "label": "最短消息长度",
+      "description": "短于这个字数的消息直接不判（「嗯」「好」「哈哈哈」不值得花一次调用）。默认 4。",
+      "min": 0,
+      "max": 100,
+      "step": 1
+    },
+    "windowSize": {
+      "type": "number",
+      "label": "判定时带多少条上下文",
+      "description": "判定用的最近聊天条数（含机器人自己的发言，便于它知道「我刚说过话，别黏人」）。默认 14。",
+      "min": 2,
+      "max": 60,
+      "step": 1
+    },
+    "judgeProbability": {
+      "type": "number",
+      "label": "判定采样率（%）",
+      "description": "100 = 每条够长的消息都判；调低可省调用量，代价是漏掉一些该接的话。默认 100。",
+      "min": 1,
+      "max": 100,
+      "step": 1
+    },
+    "dailyCallLimit": {
+      "type": "number",
+      "label": "单群每日判定上限",
+      "description": "一个群一天最多判多少次，超了自动退回原生档位。默认 400。",
+      "min": 1,
+      "max": 10000,
+      "step": 10
+    },
+    "confidenceThreshold": {
+      "type": "number",
+      "label": "自信度门槛",
+      "description": "模型自评的 confidence 低于此值就当「不接」。0 = 它说接就接。默认 0。",
+      "min": 0,
+      "max": 100,
+      "step": 5
+    },
+    "allowPrivate": {
+      "type": "boolean",
+      "label": "私聊也判定",
+      "description": "私聊本来就必回，一般不需要。默认关闭。"
+    },
+    "onlyGroups": {
+      "type": "string",
+      "label": "只在这些群生效",
+      "description": "填群号，多个用英文逗号分隔。留空 = 所有群都生效。"
+    },
+    "denyGroups": {
+      "type": "string",
+      "label": "这些群不判定",
+      "description": "填群号，多个用英文逗号分隔。"
+    },
+    "judgeModel": {
+      "type": "string",
+      "label": "判定专用模型",
+      "description": "留空 = 用聊天主模型。**强烈建议填一个能关思考的小模型**：会强制思考的模型会把 max_tokens 全烧在 reasoning 上，正文永远为空（判定直接失效）。本机实测 deepseek-flash 合适，glm-5.3-flash 不行。"
+    },
+    "judgeProvider": {
+      "type": "string",
+      "label": "判定模型所属渠道 ID",
+      "description": "填了 judgeModel 又想用另一个渠道的地址/Key 时，填模型目录里的渠道 id（留空则沿用主渠道地址与 Key，通常会导致模型名在该渠道不存在而报错）。"
+    },
+    "maxTokens": {
+      "type": "number",
+      "label": "判定输出上限（token）",
+      "description": "只输出一小段 JSON，默认 64 足够；用会思考的模型时要给到 512 以上才可能出正文，但那既慢又贵，不如直接换模型。",
+      "min": 8,
+      "max": 4000,
+      "step": 8
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "判定超时（毫秒）",
+      "description": "判定请求超时就当「不接」，不影响正常流程。默认 6000。",
+      "min": 1000,
+      "max": 30000,
+      "step": 500
+    },
+    "promptExtra": {
+      "type": "string",
+      "label": "追加判据",
+      "description": "写给判定模型看的补充规则，例如「别接任何关于抽卡的话题」。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "context-chime-note",
+        "title": "主动接话",
+        "priority": 38,
+        "content": "系统会在你没被 @ 的时候，用一个小模型判断群里这句话值不值得你接；如果判定「要接」，这次处理就是主动插话。主动插话的要求比被叫到时更高：话题必须真的跟你有关系、或者你确实有话说，否则安静结束、什么都不发也算合格。群友在聊他们自己的私事时不要插嘴。"
+      }
+    ]
+  },
+  "tools": [
+    {
+      "id": "chimelog",
+      "name": "查看插话判定记录",
+      "description": "查看「上下文插话判定」最近的判定记录：哪些消息被判要接、哪些被判不接、理由与自信度、耗时与 token。当有人问「你刚才为什么不接话」「为什么没回我」「插话判定怎么判的」时调用。",
+      "category": "system",
+      "icon": "🫧",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "number", "description": "看最近多少条，默认 15，最多 50。" },
+          "onlyResponded": { "type": "boolean", "description": "只看判定为「要接」的记录。" }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "id": "cross-memory",
+  "name": "仿生记忆（所有会话互通）",
+  "version": "2.0.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "description": "让她像人一样记事，而不是像数据库一样倒垃圾。六条仿生特性：① 遗忘曲线（强度随时间指数衰减，不常想起的自然淡掉，而不是过 48 小时一刀切）② 情绪加权（让她有情绪的事记得更牢）③ 联想检索（由当前正在聊的话题触发相关往事，毫无共同点就想不起来 —— 人不会在聊量子力学时突然说「我刚吃完饭」）④ 复习效应（想起一次就更牢一点）⑤ 记忆巩固（反复想起的升级为长期记忆，衰减慢 6 倍）⑥ 细节模糊化（越久远只给梗概，新事给得完整）。数据源是各会话聊天存档里的 self 记录，只记她自己说过的；别人的原话默认不记。不需要改内核。",
+  "author": "本机定制",
+  "enabledByDefault": true,
+  "capabilities": [
+    "status.cross-memory"
+  ],
+  "requires": [],
+  "permissions": [],
+  "settings": {
+    "enabled": true,
+    "halfLifeHours": 36,
+    "emotionBonus": 2.5,
+    "promoteAfterRecalls": 3,
+    "longTermThreshold": 0.62,
+    "longTermHalfLifeFactor": 6,
+    "recallBoost": 0.12,
+    "maxRecall": 4,
+    "minScore": 0.2,
+    "maxChars": 900,
+    "lookbackHours": 504,
+    "forgetBelow": 0.04,
+    "includeOthers": false,
+    "includeImpressions": true,
+    "maxPerScan": 400,
+    "minTextLen": 3,
+    "scanEveryMin": 5
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用仿生记忆",
+      "description": "默认开。关掉后她不再跨会话记事（各会话各记各的）。"
+    },
+    "halfLifeHours": {
+      "type": "number",
+      "label": "遗忘半衰期（小时）",
+      "description": "默认 36。一件事 36 小时后清晰度减半，72 小时后剩四分之一。这就是遗忘曲线 —— 不是什么都没忘，也不是什么都记着。"
+    },
+    "emotionBonus": {
+      "type": "number",
+      "label": "情绪对记忆的加成（倍）",
+      "description": "默认 2.5。让她有情绪的事（笑到不行、气到炸、委屈、激动）半衰期最多延长到这么多倍 —— 人就是记得住让自己有情绪的事。"
+    },
+    "promoteAfterRecalls": {
+      "type": "number",
+      "label": "想起几次就变成长期记忆",
+      "description": "默认 3。人记住一件事靠的是反复提取，不是它当时多强烈。达到这个次数就升级为长期记忆（衰减慢很多倍），基本不会忘。"
+    },
+    "longTermThreshold": {
+      "type": "number",
+      "label": "强度多少算「很重要」",
+      "description": "默认 0.62。又强、又至少被想起过一次的，也会升级为长期记忆（这是加速通道）。"
+    },
+    "longTermHalfLifeFactor": {
+      "type": "number",
+      "label": "长期记忆衰减慢几倍",
+      "description": "默认 6。长期记忆的半衰期 = 半衰期 × 这个数。"
+    },
+    "recallBoost": {
+      "type": "number",
+      "label": "想起一次加成多少",
+      "description": "默认 0.12（累计上限 0.6）。回忆会重新巩固记忆 —— 这也让「熟悉感」恢复，但细节仍按真实时间淡去。"
+    },
+    "maxRecall": {
+      "type": "number",
+      "label": "每轮最多想起几件事",
+      "description": "默认 4。人一次也就想起一两件相关的，塞太多反而不像人。"
+    },
+    "minScore": {
+      "type": "number",
+      "label": "想起来的门槛",
+      "description": "默认 0.20。分数 = 相关度×0.55 + 强度×0.30 + 新鲜度×0.15（相关度主导）。门槛越高她越少提旧事。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "这段回忆的字数上限",
+      "description": "默认 900。"
+    },
+    "lookbackHours": {
+      "type": "number",
+      "label": "最多往回记多久（小时）",
+      "description": "默认 504（三周）。更早的消息不再采集（但已采集的长期记忆仍在）。"
+    },
+    "forgetBelow": {
+      "type": "number",
+      "label": "强度低于多少就真的忘掉",
+      "description": "默认 0.04。低于这个强度的记忆会被删掉 —— 这是真正的遗忘，不只是不提起。"
+    },
+    "includeOthers": {
+      "type": "boolean",
+      "label": "把别人的话也记下来（默认关）",
+      "description": "默认关：只记她自己说过的。打开后会把她看到的**别人说的原话**也存进记忆库并可能带到别的会话 —— 群里的人并不知道自己的话会被带到私聊，请自己权衡。"
+    },
+    "includeImpressions": {
+      "type": "boolean",
+      "label": "带上她对人的印象",
+      "description": "默认开。除了经历，还把内核整理过的「对某人的印象」一并带过来（只带摘要）。"
+    },
+    "maxPerScan": {
+      "type": "number",
+      "label": "每次最多采集多少条",
+      "description": "默认 400。防止第一次运行时把几万条历史一口气吞进来。"
+    },
+    "minTextLen": {
+      "type": "number",
+      "label": "少于这么多字不值得记",
+      "description": "默认 3。过滤「嗯」「哦」这类。"
+    },
+    "scanEveryMin": {
+      "type": "number",
+      "label": "隔多少分钟采集一次",
+      "description": "默认 5。采集是增量的，不会重复记。"
+    }
+  }
+}

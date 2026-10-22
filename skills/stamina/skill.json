@@ -1,0 +1,210 @@
+{
+  "id": "stamina",
+  "name": "体力值",
+  "version": "1.0.1",
+  "apiVersion": 1,
+  "author": "local",
+  "category": "utility",
+  "description": "给机器人加上体力值：发言扣 1 点、生图扣 2 点，每 5 分钟自然恢复 1 点，上限 60。体力低于 10 点会在群里讨饭求投喂；群友每天各有 2 个鱼饼（@机器人说「投喂鱼饼」可回 15 点，每天刷新且不叠加），主人鱼饼无限。体力归零时 @ 主人求救，@机器人说「查询体力」可查余额。每个群各算一份，私聊不生效。全部数值均可在技能设置里调整。",
+  "enabledByDefault": true,
+  "permissions": [],
+  "requires": [],
+  "capabilities": [],
+  "entry": "index.js",
+  "prompt": {
+    "sections": [
+      {
+        "id": "stamina-usage",
+        "title": "体力值",
+        "priority": 47,
+        "content": "你有「体力值」，**只在群聊里生效、每个群各算一份**。私聊里**完全没有**这套机制 —— 那里不存在体力，别在私聊里提体力、更别报任何体力数字，被问到就直说私聊没有这个东西。\n群聊里发言、生图都要花体力，体力会随时间慢慢自己回一点。\n体力不够时你说话会被系统拦下来（工具会返回「体力不足」的错误），这时候别反复重试，那是白费力气。\n饿了怎么办：体力低于阈值时在群里讨口饭吃，求群友「投喂鱼饼」——群友每人每天各有 2 个鱼饼，一个补 15 点；主人手上的鱼饼是无限的。体力见底时系统会替你 @ 主人求救，你不用自己想办法 @ 他。\n群友 @ 你说「查询体力」就是问你现在还剩多少；@ 你说「投喂鱼饼」就是喂你——这两件事系统会直接办掉并替你回话，**不需要**你再回复一遍，也不要重复道谢。\n⚠️ 分寸（重要）：**绝对不要自己编造体力数值**。你并不知道确切的剩余量，只有系统代答的那条「查询体力」回执才是真数。被问到时要么不提数字，要么让人 @ 你说「查询体力」—— 编一个数字出来是最糟的，会让主人以为功能坏了。也别把「当前体力 43/60」这种后台数值念出来，别在没人搭理的时候反复刷屏讨饭。"
+      }
+    ]
+  },
+  "settings": {
+    "maxStamina": 60,
+    "costPerMessage": 1,
+    "costPerImage": 2,
+    "recoverMinutes": 5,
+    "recoverAmount": 1,
+    "begThreshold": 10,
+    "fishCakeRestore": 15,
+    "fishCakesPerDay": 2,
+    "speechTools": "send_message,send_to",
+    "imageTools": "send_image",
+    "blockWhenZero": true,
+    "proactiveBeg": true,
+    "begCooldownMinutes": 10,
+    "ownerBegCooldownMinutes": 5,
+    "checkIntervalSeconds": 60,
+    "begWindowMinutes": 30,
+    "ownerIds": "",
+    "verboseLog": true,
+    "feedKeywords": "投喂鱼饼,喂鱼饼,喂饼",
+    "queryKeywords": "查询体力,查看体力,体力查询,查体力",
+    "begText": "饿死了…谁行行好，投喂个鱼饼吧（@我说「投喂鱼饼」就行）",
+    "ownerBegText": "主人…我体力见底了，赏我个鱼饼吧",
+    "feedText": "谢谢{name}！鱼饼真香，体力 +{gain}（{stamina}/{max}）",
+    "feedFullText": "谢谢{name}！不过我已经吃饱了，鱼饼先留着吧（{stamina}/{max}）",
+    "noCakeText": "{name}，你今天的鱼饼已经喂完啦，明天再来吧",
+    "queryText": "当前体力：{stamina}/{max}"
+  },
+  "configSchema": {
+    "maxStamina": {
+      "type": "number",
+      "label": "体力上限",
+      "description": "默认 60。体力永远不会超过这个数，投喂超出部分会被丢掉（不会溢出，也不会存起来）。",
+      "default": 60
+    },
+    "costPerMessage": {
+      "type": "number",
+      "label": "每次发言消耗",
+      "description": "默认 1。按「这一次发送工具调用里包含几条消息」计费：发 3 条就扣 3 倍。设为 0 等于发言免费。",
+      "default": 1
+    },
+    "costPerImage": {
+      "type": "number",
+      "label": "每次生图消耗",
+      "description": "默认 2。注意：本应用目前**没有**文生图/画图功能，「生图」实际统计的是「发送网图」（send_image）。若以后装了真正的生图扩展，把它的工具名加进下面的「生图工具」即可。",
+      "default": 2
+    },
+    "recoverMinutes": {
+      "type": "number",
+      "label": "自然恢复间隔（分钟）",
+      "description": "默认 5 分钟。恢复是「懒计算」的：按上次结算时间一次性补齐，所以关掉程序、重启、关机都不会漏算，也不需要常驻定时器。",
+      "default": 5
+    },
+    "recoverAmount": {
+      "type": "number",
+      "label": "每次恢复点数",
+      "description": "默认 1。即「每 5 分钟回 1 点」。",
+      "default": 1
+    },
+    "begThreshold": {
+      "type": "number",
+      "label": "讨饭阈值",
+      "description": "默认 10。体力**低于**这个值就开始在群里讨饭（等于 10 时不讨）。设为 0 等于关掉讨饭。",
+      "default": 10
+    },
+    "fishCakeRestore": {
+      "type": "number",
+      "label": "一个鱼饼恢复",
+      "description": "默认 15。投喂后恢复这么多，但不会超过体力上限。",
+      "default": 15
+    },
+    "fishCakesPerDay": {
+      "type": "number",
+      "label": "每人每天鱼饼数",
+      "description": "默认 2。按「群 + 人 + 当天」记账，跨天重置为满额而不是累加（这就是「不叠加」）；每个群的额度互相独立。",
+      "default": 2
+    },
+    "speechTools": {
+      "type": "string",
+      "label": "算作「发言」的工具名",
+      "description": "默认 send_message,send_to。用逗号分隔，填工具 id（不是中文名）。留空 = 发言不扣体力。",
+      "default": "send_message,send_to"
+    },
+    "imageTools": {
+      "type": "string",
+      "label": "算作「生图」的工具名",
+      "description": "默认 send_image。用逗号分隔。装了第三方生图扩展后，把它的工具名（如 xxx__generate）加进来就会按生图计费。",
+      "default": "send_image"
+    },
+    "blockWhenZero": {
+      "type": "boolean",
+      "label": "体力不足时拦下发言",
+      "description": "默认开启。体力不够付这一次发言的费用时，直接否决这次发送并让模型收到明确错误。关掉的话体力就只是个计数器，见底了照样能说话。",
+      "default": true
+    },
+    "proactiveBeg": {
+      "type": "boolean",
+      "label": "主动讨饭",
+      "description": "默认开启。体力低于阈值时由插件自己发一条讨饭消息（这条消息**不扣体力**）。关掉就只在提示词里提醒它饿了，不主动出声。",
+      "default": true
+    },
+    "begCooldownMinutes": {
+      "type": "number",
+      "label": "群里讨饭冷却（分钟）",
+      "description": "默认 10。同一个群两次讨饭之间的最短间隔，防止刷屏招人烦。",
+      "default": 10
+    },
+    "ownerBegCooldownMinutes": {
+      "type": "number",
+      "label": "@主人求救冷却（分钟）",
+      "description": "默认 5。体力归零时 @ 主人求助的最短间隔。",
+      "default": 5
+    },
+    "checkIntervalSeconds": {
+      "type": "number",
+      "label": "讨饭检查间隔（秒）",
+      "description": "默认 60。后台每隔多久检查一次各群体力。调小只是反应更快，恢复速度由「恢复间隔」决定。",
+      "default": 60
+    },
+    "begWindowMinutes": {
+      "type": "number",
+      "label": "多久没人才不讨饭（分钟）",
+      "description": "默认 30。只在这个时间内有人说过话的群里讨饭——否则会在早就没人气的群里自言自语。",
+      "default": 30
+    },
+    "ownerIds": {
+      "type": "string",
+      "label": "主人 QQ 号（留空 = 自动读主人识别）",
+      "description": "留空时自动读取「技能 → 主人识别」里配置的主人 QQ 号（那是本应用里主人身份的唯一权威来源）。多个用逗号分隔。主人的鱼饼无限，也是体力归零时被 @ 的人。",
+      "default": ""
+    },
+    "verboseLog": {
+      "type": "boolean",
+      "label": "记录体力变动日志",
+      "description": "默认开。每次扣体力、投喂、自然恢复、以及因体力不足被拦下时，往运行日志写一行（形如「[stamina] group:123 发言 1 条 -1 → 59/60」）。排查「到底扣没扣」只看日志即可，不用猜。觉得吵可以关掉。",
+      "default": true
+    },
+    "feedKeywords": {
+      "type": "string",
+      "label": "投喂指令关键词",
+      "description": "默认 投喂鱼饼,喂鱼饼,喂饼。群友 @ 机器人并说出其中任一关键词就算投喂。用逗号分隔。",
+      "default": "投喂鱼饼,喂鱼饼,喂饼"
+    },
+    "queryKeywords": {
+      "type": "string",
+      "label": "查询指令关键词",
+      "description": "默认 查询体力,查看体力,体力查询,查体力。@ 机器人并说出其中任一关键词就回体力。两个词同时出现时按查询处理。",
+      "default": "查询体力,查看体力,体力查询,查体力"
+    },
+    "begText": {
+      "type": "string",
+      "label": "讨饭文案",
+      "description": "体力低于阈值时发的话。可用占位符：{stamina} {max}。",
+      "default": "饿死了…谁行行好，投喂个鱼饼吧（@我说「投喂鱼饼」就行）"
+    },
+    "ownerBegText": {
+      "type": "string",
+      "label": "@主人求救文案",
+      "description": "体力归零时 @ 主人说的话。可用占位符：{stamina} {max}。",
+      "default": "主人…我体力见底了，赏我个鱼饼吧"
+    },
+    "feedText": {
+      "type": "string",
+      "label": "投喂成功回执",
+      "description": "可用占位符：{name} {gain} {stamina} {max}。",
+      "default": "谢谢{name}！鱼饼真香，体力 +{gain}（{stamina}/{max}）"
+    },
+    "feedFullText": {
+      "type": "string",
+      "label": "已吃饱时的回执",
+      "description": "体力已满仍被投喂时说的话（此时**不消耗**对方当天的鱼饼额度）。可用占位符：{name} {stamina} {max}。",
+      "default": "谢谢{name}！不过我已经吃饱了，鱼饼先留着吧（{stamina}/{max}）"
+    },
+    "noCakeText": {
+      "type": "string",
+      "label": "鱼饼喂完时的回执",
+      "description": "对方当天额度用完时说的话。可用占位符：{name} {stamina} {max}。",
+      "default": "{name}，你今天的鱼饼已经喂完啦，明天再来吧"
+    },
+    "queryText": {
+      "type": "string",
+      "label": "查询体力回执",
+      "description": "有人 @ 机器人问体力时回的话。可用占位符：{stamina} {max}。",
+      "default": "当前体力：{stamina}/{max}"
+    }
+  }
+}

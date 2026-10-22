@@ -1,0 +1,109 @@
+{
+  "id": "skill-summary",
+  "name": "功能介绍",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "有人问「你会什么 / 有什么功能 / 技能列表」时，把机器**当前真正生效**的技能自动汇总成 1.2.3.4.5… 的简洁清单，并配一张随机的 Pixiv Q 版二次元图，文字与图片合并成同一条消息发出。只在私聊或被 @ / 拍了拍时给，群里随便聊天不会自己冒出来。",
+  "author": "为 QQ Agent 定制",
+  "entry": "index.js",
+  "enabledByDefault": true,
+
+  "capabilities": [],
+  "requires": [],
+  "_note_deps": [
+    "不需要额外装 Python 或别的技能。",
+    "清单来源：直接读核心的 skillManager（../../../src/skills/manager.js），",
+    "只取 active=true 的技能（即设置里已启用、依赖也满足的），所以关掉的技能、",
+    "加载失败的残留目录都不会出现在清单里。以后装上新技能，它会自动跟上。",
+    "配图由 pixiv-fetch.js 完成：从核心配置的 skills['pixiv-image-tagsearch'] 读代理、",
+    "v2rayN 目录、内容分级（与 Pixiv 插件共用同一份配置，不用再填一遍）；",
+    "代理没开时自动拉起 sing-box；取图失败就退化成纯文字一条，不报错、不拆条。"
+  ],
+
+  "settings": {
+    "enabled": true,
+    "mentionOnly": true,
+    "maxItems": 20,
+    "briefLength": 22,
+    "imageEnabled": true,
+    "excludeIds": "cache-stability,token-saver,affinity_1,affinity_2,music_1,music_2,music_3,trpg_1,verify-first_1,verify-first_2,verify-first_3,pixiv-image-tagsearch_1,ai-image_1,bili-share_1,daily-fortune_1,daily-fortune_2,daily-fortune_3"
+  },
+
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用功能介绍",
+      "description": "总开关。关掉后模型连工具都看不到。"
+    },
+    "mentionOnly": {
+      "type": "boolean",
+      "label": "群里只在被点名时给",
+      "description": "默认开。开着时群里必须 @ 机器人（或拍一拍它）才会念功能清单，普通聊天不会自己冒出来；私聊不受影响。"
+    },
+    "maxItems": {
+      "type": "number",
+      "label": "清单最多列几条",
+      "description": "默认 20。超出的部分只报总数，不逐条列 —— 但图片照常发。这样装再多技能也不会刷一屏。"
+    },
+    "briefLength": {
+      "type": "number",
+      "label": "每条说明最长多少字",
+      "description": "默认 22。每条只取技能描述的第一句、去掉括号补充，再按这个长度截断，保证一行一条。"
+    },
+    "imageEnabled": {
+      "type": "boolean",
+      "label": "结尾配一张 Q 版图",
+      "description": "默认开。每次被问都随机换一张 Q 版（ちびキャラ）二次元图，与清单合并成**同一条**消息。代理、分级、图库目录直接用 Pixiv 插件里已填好的设置。关掉则只发文字。"
+    },
+    "excludeIds": {
+      "type": "string",
+      "label": "排除的技能 id",
+      "description": "逗号分隔。默认排掉两类：① 纯框架内部件（cache-stability 缓存优化、token-saver 节流，念出来用户看不懂有什么意义）；② 名字带 _1 _2 _3 的重复副本目录（同一个技能装了好几份，列出来会重复）。清空则全都列出来。"
+    }
+  },
+
+  "prompt": {
+    "sections": [
+      {
+        "id": "skill-summary-usage",
+        "title": "功能介绍",
+        "priority": 40,
+        "content": "有人问「你会什么」「有什么功能」「你能干什么」「技能列表」「介绍一下你自己会做啥」时，调 `skill-summary__summary`。\n\n【这个工具自己发消息】它会把整理好的清单**连同配图合并成一条**直接发出去（一个是气泡里列表在上、图在下）。所以：**调用它之后不要再调 send_message**，也不要复述或改写清单内容 —— 直接结束这一轮。\n\n【什么时候用】只在这两种情况：① 私聊里对方问起；② 群里**有人 @ 你或拍了拍你**、并且是在问功能。群里别人只是聊天、没点你，就别用 —— 工具本身会拒绝，别去撞。\n\n【先确认工具在不在】如果 `skill-summary__summary` **不在你这次的可用工具列表里**，就当这条提示不存在：不要调它、也不要提功能清单这回事，正常聊别的即可 —— 硬调只会得到「未知工具」。\n\n【清单内容不用你操心】清单是从机器人当前**真正生效**的技能自动生成的（关掉的、加载失败的都不会出现），顺序是固定的 1.2.3.4.5…。你不需要自己回想或凭印象罗列功能，那样反而会漏、会写错。\n\n【文案】工具已经把清单和配图都发出去了，你不需要再补话。如果工具返回里带了失败说明（比如配图没拿到），也**不要**向用户解释这些技术细节。\n\n【纪律】\n· 只在被问到时给，别主动报菜单。\n· 工具返回「没被点名」时，当作没这回事，别在群里解释，正常聊别的。\n· 清单里的内容会随用户装/关技能变化，别把某次结果当成永久固定的说法。"
+      }
+    ]
+  },
+
+  "triggers": {
+    "when": "私聊里问到，或群里被 @ / 拍了拍之后问机器人会什么、有什么功能、技能列表",
+    "examples": [
+      "你会什么",
+      "有什么功能",
+      "你能干什么",
+      "技能列表",
+      "@机器人 你都会啥",
+      "介绍一下你的功能"
+    ]
+  },
+
+  "_note_tools_is_metadata": "上游把 tools[] 当说明性元数据读，不会自动注册；真正的注册在 index.js 的 api.registerTool。id 写 'summary'，上游自动加 'skill-summary__' 前缀 ⇒ 模型看到的是 skill-summary__summary。",
+
+  "tools": [
+    {
+      "id": "summary",
+      "name": "发送功能介绍",
+      "description": "把机器人当前生效的技能自动整理成 1.2.3.4.5… 的简洁清单，配一张随机 Q 版二次元图，合并成同一条消息发出。工具自己发送，返回后不要再补消息",
+      "category": "utility",
+      "icon": "📋",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "调用工具前你写的开场白，可留空（清单和配图由工具自己生成）"
+          }
+        }
+      }
+    }
+  ]
+}

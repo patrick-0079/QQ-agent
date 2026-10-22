@@ -1,0 +1,66 @@
+{
+  "id": "poke-counter",
+  "name": "戳一戳统计",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "统计每天被戳一戳的次数；被戳时按概率回复预设文本，并对一个数字执行预设运算后播报结果。",
+  "author": "",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "permissions": [],
+  "settings": {
+    "replyProbability": 0.3,
+    "cooldownMs": 3000,
+    "replyTexts": "别戳了啦\n戳够了没有\n今天第 {count} 次了哦\n再戳我要生气了 {n}",
+    "showNumber": true,
+    "showDailyCount": true,
+    "expression": "n + 1",
+    "initialValue": 0,
+    "perGroup": false
+  },
+  "configSchema": {
+    "replyProbability": {
+      "type": "number",
+      "label": "回复概率",
+      "description": "被戳时回复的概率，0~1。0.3 = 三成概率回一句，1 = 每次都回。"
+    },
+    "cooldownMs": {
+      "type": "number",
+      "label": "冷却时间（毫秒）",
+      "description": "同一会话两次回复的最小间隔，防止连续戳时刷屏。0 = 不冷却。"
+    },
+    "replyTexts": {
+      "type": "string",
+      "multiline": true,
+      "label": "预设回复文本",
+      "description": "每行一条，被戳时随机抽一条发送。占位符：{n} = 当前数值，{count} = 今日被戳次数。"
+    },
+    "showNumber": {
+      "type": "boolean",
+      "label": "回复中带上当前数值",
+      "description": "若文本里已写 {n}，以此为准；否则在回复末尾自动追加「当前数值：…」。"
+    },
+    "showDailyCount": {
+      "type": "boolean",
+      "label": "回复中带上今日次数",
+      "description": "若文本里已写 {count}，以此为准；否则在回复末尾自动追加「今天被戳 N 次了」。"
+    },
+    "expression": {
+      "type": "string",
+      "label": "数字运算表达式",
+      "description": "每次被戳对当前数值 n 执行的运算，结果存为新数值。例：n + 1、n * 2 + 1、n + Math.floor(Math.random()*5)。"
+    },
+    "initialValue": {
+      "type": "number",
+      "label": "初始数值",
+      "description": "首次启用时数值的起点，默认 0。"
+    },
+    "perGroup": {
+      "type": "boolean",
+      "label": "按群独立统计",
+      "description": "关闭：所有群共用一份计数与数值。开启：每个群/私聊各自计数、各自维护数值。两种数据同时保留，切换不丢历史。"
+    }
+  }
+}

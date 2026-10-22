@@ -1,0 +1,87 @@
+{
+  "id": "reminder",
+  "name": "定时提醒",
+  "version": "1.1.4",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "说「提醒我半小时后拿快递」「明天早上9点提醒我开会」，到点机器人会 @提醒人并播报提醒内容。任务持久化在本地，重启机器人不丢；支持查询和取消待办提醒。时间解析由模型完成，工具只收绝对时间，所以「明早」「周五晚上」这类说法都能用。用法：@机器人 说「提醒我…」「我的待办」即可。",
+  "author": "QQ Agent",
+  "entry": "index.js",
+  "permissions": [
+    "web_fetch"
+  ],
+  "enabledByDefault": true,
+  "capabilities": [
+    "status.reminder"
+  ],
+  "settings": {
+    "enabled": true,
+    "scanIntervalSec": 20,
+    "maxActive": 50,
+    "keepAfterDoneDays": 1
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用提醒",
+      "description": "关闭后不新增、不播报（已存任务保留）。",
+      "group": "提醒功能"
+    },
+    "scanIntervalSec": {
+      "type": "number",
+      "label": "扫描间隔（秒）",
+      "description": "多久检查一次到点任务。默认 20 秒，最小 5。",
+      "group": "提醒功能"
+    },
+    "maxActive": {
+      "type": "number",
+      "label": "待办上限",
+      "description": "防止刷屏的保险丝：同时挂着的提醒最多几条。默认 50。",
+      "group": "待办容量"
+    },
+    "keepAfterDoneDays": {
+      "type": "number",
+      "label": "已完成保留（天）",
+      "description": "播报完的提醒留几天再从文件里清掉（留着自己翻记录）。默认 1。",
+      "group": "待办容量"
+    }
+  },
+  "prompt": {
+    "when": "当用户发送以反斜杠开头的提醒指令时——「\\提醒 半小时后拿快递」「\\提醒 明早9点开会」「\\提醒 周五交报告」，也用于查询（「\\提醒」）和取消。\n⚠️ **没有反斜杠就不响应**：用户随口说「提醒我一下」「别忘了」这类话时**不要**调用本工具 —— 那是闲聊，不是指令。只有反斜杠 + 指令词才算。",
+    "examples": [
+      "\\提醒 半小时后拿快递",
+      "\\提醒 明天早上9点开会",
+      "\\提醒",
+      "\\待办"
+    ],
+    "instruction": "设置提醒用 set_reminder 工具：把用户说的时间换算成绝对时间填 when（本地时间的 ISO 字符串，如 2026-09-21T15:30:00），提醒内容浓缩成一句填 text。用户说「X分钟后/秒后」这类相对时间时优先填 minutes（分钟数，可带小数），不用算 when。查询用 list_reminders，取消用 cancel_reminder（id 从查询结果拿，用户没给 id 就先查）。设置成功后用一句话向用户确认时间和内容，不要复述工具返回的全部内容。\n⚠️ 本工具**只有用户发了以反斜杠开头的指令才会出现**（如 「\\提醒」、「\\待办」）。既然你现在能看到这个工具，说明用户确实发了指令，照做即可。"
+  },
+  "tools": [
+    {
+      "id": "set_reminder",
+      "name": "设置提醒",
+      "description": "设置一条到点播报的提醒。时间换算成绝对时间填 when；相对时间（X分钟后）填 minutes。播报在原会话发出，群聊里会 @设置人。",
+      "category": "utility",
+      "icon": "⏰"
+    },
+    {
+      "id": "list_reminders",
+      "name": "查询提醒",
+      "description": "列出当前会话的待办提醒（id、时间、内容）。",
+      "category": "utility",
+      "icon": "📋"
+    },
+    {
+      "id": "cancel_reminder",
+      "name": "取消提醒",
+      "description": "按 id 取消一条待办提醒。",
+      "category": "utility",
+      "icon": "🗑️"
+    }
+  ],
+  "commandOnly": true,
+  "commands": [
+    "提醒",
+    "待办"
+  ]
+}

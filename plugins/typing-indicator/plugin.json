@@ -1,0 +1,74 @@
+{
+  "id": "typing-indicator",
+  "name": "正在输入提示（私聊）",
+  "version": "1.0.1",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "私聊里让机器人像真人一样亮起「对方正在输入…」：从决定要回话（开始准备）到最后一条消息发出之间，对方 QQ 顶栏一直显示正在输入。走 OneBot 的 set_input_status（QQ NT 协议 oidb 0xcd4_1，即推送 0x210-0x115 的 C2C 输入状态，eventType=1），按 3.5 秒节奏刷新（真人也是边打边刷新），消息发出后自动收尾。群聊不生效——这个状态通知本身是私聊（C2C）专属的。零 token：不改提示词、不注册工具、不叫模型，只在对的时机补发状态包。",
+  "author": "本机定制",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": true,
+  "capabilities": ["status.typing-indicator", "typing.indicate"],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "firstDelayMs": 400,
+    "pingIntervalMs": 3500,
+    "postSendTailMs": 2500,
+    "silentGraceMs": 60000,
+    "maxTypingMs": 120000,
+    "skipChats": "",
+    "logPings": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用「正在输入」提示",
+      "description": "关掉就完全不发状态包（对方看不到正在输入）。",
+      "group": "开关"
+    },
+    "firstDelayMs": {
+      "type": "number",
+      "label": "亮起延迟（毫秒）",
+      "description": "开始准备回话后多久才亮起，默认 400ms。像人先抬手再打字——0 会显得有点抢。",
+      "group": "节奏"
+    },
+    "pingIntervalMs": {
+      "type": "number",
+      "label": "刷新间隔（毫秒）",
+      "description": "默认 3500ms。QQ 的「正在输入」会过期，太长会中途熄灭，太短纯属浪费请求。实际间隔带 ±20% 抖动。",
+      "group": "节奏"
+    },
+    "postSendTailMs": {
+      "type": "number",
+      "label": "发出消息后的收尾延迟（毫秒）",
+      "description": "默认 2500ms。机器人经常连发两三条，这个窗口里再发下一条就继续亮着（真人也这样）。",
+      "group": "节奏"
+    },
+    "silentGraceMs": {
+      "type": "number",
+      "label": "一直没发出消息的静默上限（毫秒）",
+      "description": "默认 60000ms。模型想了半天最后决定不说话时，超过这个静默时间就撤掉提示，免得一直吊着对方。",
+      "group": "节奏"
+    },
+    "maxTypingMs": {
+      "type": "number",
+      "label": "单轮硬上限（毫秒）",
+      "description": "默认 120000ms。无论怎么算，一轮最多亮这么久（防卡死轮次里无限刷新）。",
+      "group": "节奏"
+    },
+    "skipChats": {
+      "type": "string",
+      "label": "不生效的会话",
+      "description": "填 private:123456 这种（多个用逗号分隔）。比如对某个好友不想装真人。",
+      "group": "范围"
+    },
+    "logPings": {
+      "type": "boolean",
+      "label": "每次都写日志（排查用）",
+      "description": "默认关：每轮只在收尾时写一行。打开后亮起/每次刷新/收尾全写，方便对着时间线排查。",
+      "group": "调试"
+    }
+  }
+}

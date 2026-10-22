@@ -1,0 +1,71 @@
+{
+  "id": "reply-pacing",
+  "name": "回应节奏（等他说完）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "让她像真人一样等对方把话说完再回：对方连发几条时，每来一条就把回复倒计时往后推（安静 N 秒才回，默认 5 秒）；如果看着话还没说完（收在逗号/省略号上、特别短），再多等一段；对方说完后再留一个补充窗口，看他有没有要补的。最后把他连着说的几句**当成一件事整体回应**，而不是逐条回。同时只处理最后发言的那个人：别人在这批里的发言只当背景，不会把别人的话串进对他的回应里。开关关掉时行为与没装完全一致。",
+  "author": "本机定制",
+  "enabledByDefault": true,
+  "capabilities": ["status.reply-pacing"],
+  "requires": [],
+  "permissions": [],
+  "settings": {
+    "enabled": true,
+    "silenceMs": 5000,
+    "extraWaitMs": 3000,
+    "maxWaitMs": 45000,
+    "holdIfUnfinished": true,
+    "sameSenderOnly": true,
+    "isolatePrompt": true,
+    "onlyOwner": false,
+    "targets": ""
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用（等他说完再回）",
+      "description": "默认开。关掉后完全恢复内核原本的固定倒计时行为，一个字都不注入。"
+    },
+    "silenceMs": {
+      "type": "number",
+      "label": "安静多久才算说完（毫秒）",
+      "description": "默认 5000（5 秒）。对方每发一条就把倒计时重置成这个值 —— 也就是「他安静 5 秒之后我才回」。"
+    },
+    "extraWaitMs": {
+      "type": "number",
+      "label": "看着没说完时再多等（毫秒）",
+      "description": "默认 3000。消息收在逗号/省略号上、或者特别短（像在打字中途），判定为「还没说完」，在安静窗口基础上再多给这一段。"
+    },
+    "maxWaitMs": {
+      "type": "number",
+      "label": "最长等待（毫秒）",
+      "description": "默认 45000。总等待超过它就不再往后推了，直接回 —— 防止对方一直刷屏导致她永远不开口。"
+    },
+    "holdIfUnfinished": {
+      "type": "boolean",
+      "label": "判断「没说完」并延长",
+      "description": "默认开。关掉后只按固定的安静窗口走，不做语义判断。"
+    },
+    "sameSenderOnly": {
+      "type": "boolean",
+      "label": "只在同一个人连发时延长",
+      "description": "默认开。这样换人说话时这一批照常处理，别人的话不会被并进对他的回应里。"
+    },
+    "isolatePrompt": {
+      "type": "boolean",
+      "label": "注入「只回一个人」的说明",
+      "description": "默认开。会告诉她这批消息里最后说话的是谁、其他人的发言只是背景，并要求把他连着说的几句当成一件事整体回应。"
+    },
+    "onlyOwner": {
+      "type": "boolean",
+      "label": "只对主人生效",
+      "description": "默认关。打开后只有主人的会话会等她说完，群里其他人按原来的节奏。"
+    },
+    "targets": {
+      "type": "string",
+      "label": "只对这些 QQ 生效（可选）",
+      "description": "留空 = 所有会话。多个用逗号分隔。填了之后只有这些人的消息会被等待聚合。"
+    }
+  }
+}

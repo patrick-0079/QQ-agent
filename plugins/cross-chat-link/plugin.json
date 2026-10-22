@@ -1,0 +1,50 @@
+{
+  "id": "cross-chat-link",
+  "name": "跨会话认人",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "entry": "index.js",
+  "description": "同一个人在群里和私聊里是同一套认知：说话时把你在别的会话里对他的印象一起带上。纯 hooks，只读小文件。\n\n【怎么用】\n· 装上即生效；印象来自「记忆」页，想让它更懂谁就多写两条印象。\n· 只提到私聊内容时会附隐私提醒；别的会话里没记忆的人一个字都不加。",
+  "author": "QQ Agent（对应 0.2 的跨会话记忆断层）",
+  "enabledByDefault": true,
+  "capabilities": [
+    "memory.person-card"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "maxImpressions": 3,
+    "maxOtherChats": 2,
+    "includeRecentLine": true,
+    "privacyNote": true
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用跨会话认人",
+      "description": "关掉后同一人在群和私聊里又会被当成两段互不相干的记忆。"
+    },
+    "maxImpressions": {
+      "type": "number",
+      "label": "每人最多带几条印象",
+      "description": "默认 3 条，按时间倒序取最新的。"
+    },
+    "maxOtherChats": {
+      "type": "number",
+      "label": "最多列几个别的会话",
+      "description": "默认 2 个，避免同一个人在多个群里时把提示词撑长。"
+    },
+    "includeRecentLine": {
+      "type": "boolean",
+      "label": "带上对方在别处说的最后一句话",
+      "description": "只在小会话里做（文件大于 512KB 就跳过，不做整段解析）。"
+    },
+    "privacyNote": {
+      "type": "boolean",
+      "label": "提醒别在群里复述私聊内容",
+      "description": "私聊记忆被带到群里时追加一句隐私提醒，默认开。"
+    }
+  },
+  "prompt": null
+}

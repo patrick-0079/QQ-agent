@@ -1,0 +1,76 @@
+{
+  "id": "net-proxy",
+  "name": "网络代理",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "给 QQ Agent 的出站网络准备一条代理通道（Clash / v2rayN / 公司网关等），支持两种用法：\n\n【直连优先（默认，推荐）】平时全部直连，**只有当某个请求连不上时**（DNS 解析不出来、连接被拒、连接超时）才自动改用代理重试一次。对你来说：能直连的照旧直连、速度不受影响；只有被墙/不通的那些接口才从代理出去。同一个请求在内部重试，模型和其它扩展完全无感。\n\n【全部走代理】所有外部请求一律从代理出去（本机地址除外）。只有在你确定「整个网络都得走代理」时才用它。\n\n【覆盖范围】调用大模型、联网搜索、拉取模型列表、价格表、社区同步、更新检查、网页抓取（web_fetch），以及其它扩展自己发起的请求，两条通道都管。\n\n【本机地址永远直连】OneBot（127.0.0.1:3000/3001）与控制台都在本机；把本机流量塞进代理会直接打断与 QQ 协议端的通信，所以 localhost / 127.0.0.1 / ::1 是硬绕行，不受配置影响。\n\n【不支持 SOCKS5】本应用没有内置 SOCKS 客户端，硬填 socks5 只会让请求失败；请在代理软件里改用 HTTP/混合端口（Clash、v2rayN、Surge 都有）。\n\n【注意】开启后到保存设置之间立即生效，不需要重启。",
+  "author": "本地自建",
+  "enabledByDefault": false,
+  "capabilities": [
+    "network.proxy-config"
+  ],
+  "requires": [],
+  "settings": {
+    "mode": "fallback",
+    "protocol": "http",
+    "host": "127.0.0.1",
+    "port": 7890,
+    "username": "",
+    "password": "",
+    "bypass": "localhost, 127.0.0.1, ::1, 192.168.",
+    "directTimeoutSec": 10,
+    "proxyWebFetch": true
+  },
+  "configSchema": {
+    "mode": {
+      "type": "enum",
+      "values": ["fallback", "always"],
+      "label": "代理用法",
+      "description": "fallback（默认，推荐）= 平时直连，连不上才自动改用代理重试；always = 所有外部请求都走代理。想让国内接口保持原速、只救被墙的接口，就用 fallback。"
+    },
+    "protocol": {
+      "type": "enum",
+      "values": ["http", "https"],
+      "label": "代理协议",
+      "description": "指「代理服务器本身」用什么协议，不是目标网站。Clash / v2rayN 的混合端口、HTTP 端口都选 http；只有代理端开了 TLS（很少见）才选 https。"
+    },
+    "host": {
+      "type": "string",
+      "label": "代理地址",
+      "description": "本机代理填 127.0.0.1；代理跑在别的机器上就填它的 IP 或域名。留空 = 本插件不生效（全部直连）。"
+    },
+    "port": {
+      "type": "number",
+      "label": "代理端口",
+      "description": "Clash 默认 7890（混合端口），v2rayN 默认 10809（HTTP）。必须是「HTTP / 混合」端口，不是 SOCKS 端口。"
+    },
+    "username": {
+      "type": "string",
+      "label": "代理用户名（没有就留空）",
+      "description": "只有代理要求账号密码时才填。填了用户名就必须同时填密码。"
+    },
+    "password": {
+      "type": "string",
+      "secret": true,
+      "label": "代理密码",
+      "description": "留空 = 不修改已保存的密码。"
+    },
+    "bypass": {
+      "type": "string",
+      "multiline": true,
+      "label": "永远不走代理的地址",
+      "description": "逗号或换行分隔。命中规则：完全相等，或是它的子域（填 example.com 能覆盖 api.example.com）。localhost / 127.0.0.1 / ::1 永远直连，不用重复填。"
+    },
+    "directTimeoutSec": {
+      "type": "number",
+      "label": "直连等多久算「连不上」（秒）",
+      "description": "默认 10。只影响 fallback 模式：直连在这个时间内没连上就判定失败，自动改用代理重试。被墙的地址通常表现为一直卡住，所以这个值别设太大（3~10 秒比较合适）。"
+    },
+    "proxyWebFetch": {
+      "type": "boolean",
+      "label": "网页抓取也纳入代理",
+      "description": "开启（默认）：模型用的 web_fetch 抓网页、下载图片同样享受上面的代理策略（fallback 模式下同样是「连不上才走代理」）。关掉：只有接口类请求（大模型、搜索、价格表等）用代理，抓网页始终直连。"
+    }
+  }
+}

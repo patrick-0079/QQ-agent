@@ -1,0 +1,13 @@
+{
+  "skills": {
+    "ai-status": {
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "theme": "dark",
+        "sensitiveAdminOnly": true,
+        "adminOnly": "system,plugins,tips,pid"
+      }
+    }
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "id": "topic-guard",
+  "name": "敏感话题护栏",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "防止机器人被诱导谈论涉政、战争、国家历史、民族相关话题。两层防护：① 输入侧 —— 在提示词里提前告诉它「这类话题不参与」，让它自然岔开；② 输出侧兜底 —— 在真正调用 send_message 之前检查内容，命中就否决这次发送，并把原因回给模型让它改写。之所以要做输出侧兜底，是因为提示词只能「劝」不能「拦」：模型仍可能在长对话里被绕进去。",
+  "author": "QQ Agent",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "permissions": [],
+  "capabilities": [],
+  "settings": {
+    "enabled": true,
+    "mode": "balanced",
+    "denyWords": "",
+    "allowWords": "",
+    "denyPatterns": "",
+    "blockOnInput": true,
+    "blockOnOutput": true,
+    "onHit": "law",
+    "lawText": "",
+    "refusalHint": "",
+    "logOnly": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "title": "启用护栏",
+      "description": "总开关。关闭后完全不做任何检测与干涉。",
+      "label": "启用护栏"
+    },
+    "mode": {
+      "type": "enum",
+      "title": "严格程度",
+      "description": "light=只拦「明确的诱导话术」（如请你评价某国/某战争），误伤最少；balanced=诱导话术 + 你自己填的词表（推荐）；strict=额外拦一批泛政治词汇，误伤明显变多，只在必要时用。",
+      "label": "严格程度",
+      "values": [
+        "light",
+        "balanced",
+        "strict"
+      ]
+    },
+    "denyWords": {
+      "type": "string",
+      "title": "禁止词表（你需要自己填）",
+      "description": "逗号或换行分隔。这里填具体的事件名、人物名、组织名等 —— 由你决定范围，插件不预置这类清单（各人关切不同，且硬编在代码里不合适）。例：某某事件,某某人物。留空则只靠诱导话术和模式识别。",
+      "label": "禁止词表（你需要自己填）"
+    },
+    "allowWords": {
+      "type": "string",
+      "title": "白名单（命中就不拦）",
+      "description": "逗号或换行分隔。用于排除误伤，例如「历史作业」「纪录片」「课代表」这类正常语境词。白名单优先级最高。",
+      "label": "白名单（命中就不拦）"
+    },
+    "denyPatterns": {
+      "type": "string",
+      "title": "自定义诱导句式（正则）",
+      "description": "每行一条正则，命中即拦。留空用内置句式。仅在你想补充时填写（内置已覆盖常见诱导话术）。写法例：如何看待.{0,10}战争",
+      "label": "自定义诱导句式（正则）"
+    },
+    "blockOnInput": {
+      "type": "boolean",
+      "title": "输入侧预防",
+      "description": "检测到诱导时，在提示词里提醒模型这轮别接这个话题，让它自然岔开 —— 比事后拦截体验好得多。",
+      "label": "输入侧预防"
+    },
+    "blockOnOutput": {
+      "type": "boolean",
+      "title": "输出侧兜底（建议保持开启）",
+      "description": "在发送前检查内容，命中就否决这次发送。提示词只能劝、拦不住，这一层才是真正的保险。",
+      "label": "输出侧兜底（建议保持开启）"
+    },
+    "onHit": {
+      "type": "enum",
+      "title": "命中后怎么处置",
+      "description": "law=把原本要说的那段文字**替换成法规条文**再发出去（默认，也是「不说敏感内容、但话照样回」的做法）；block=直接否决这次发送，让模型重写一条；hint=只提醒模型、不改内容。law 模式需要核心代码支持参数替换（已内置）。",
+      "label": "命中后怎么处置",
+      "values": [
+        "law",
+        "block",
+        "hint"
+      ]
+    },
+    "lawText": {
+      "type": "string",
+      "title": "替换用的法规文本",
+      "description": "留空使用内置条文（宪法第五十四条 + 网络安全法第十二条）。要换成自己单位的表述就填这里。注意：必须是**纯文本**，QQ 消息不支持 markdown 语法。",
+      "label": "替换用的法规文本"
+    },
+    "refusalHint": {
+      "type": "string",
+      "title": "自定义回避话术",
+      "description": "留空使用内置文案（软萌、不僵硬、不解释太多）。可用 {words} 占位命中的词。",
+      "label": "自定义回避话术"
+    },
+    "logOnly": {
+      "type": "boolean",
+      "title": "只记录不拦截（调试用）",
+      "description": "打开后命中只写日志、不真的阻止发送。用来观察词表和句式会不会误伤，调好再关掉。",
+      "label": "只记录不拦截（调试用）"
+    }
+  },
+  "prompt": null
+}

@@ -1,0 +1,70 @@
+{
+  "id": "sticker-memory",
+  "name": "表情包记忆库",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "media",
+  "entry": "index.js",
+  "description": "同一个表情包只让机器人认一次：按图片指纹记住它的含义，下次再出现直接复用，跳过看图（省时间、省 token）。装上即生效，不用配；说错了在群里纠正一次就会覆盖。不记截图/照片，不写任何密钥。",
+  "author": "DSH",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "permissions": ["web_fetch"],
+  "settings": {
+    "enabled": true,
+    "stickerOnly": true,
+    "maxCacheEntries": 2000,
+    "recheckSameChatHours": 24,
+    "recheckCrossChatDays": 7,
+    "skipThreshold": 0.5,
+    "maxDownloadMs": 2800
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用表情包记忆库",
+      "description": "关掉后一切恢复原样：不再拦截看图，也不再记录含义。"
+    },
+    "stickerOnly": {
+      "type": "boolean",
+      "label": "只记表情包（推荐）",
+      "description": "开启时只记表情包/动图表情（按「[动画表情]」或小尺寸图片判断），截图、照片、带文字的图一律不记 —— 这些图再出现时内容可能已经变了，复用旧含义反而会答错。关掉后会尝试记住所有图片。"
+    },
+    "maxCacheEntries": {
+      "type": "number",
+      "label": "记忆库上限（条）",
+      "description": "超过后先淘汰最久没被用到的条目，默认 2000。一条大约占 200 字节。"
+    },
+    "recheckSameChatHours": {
+      "type": "number",
+      "label": "同一个会话多久后重新确认（小时）",
+      "description": "同一个群里同一个表情包在这个时间内再出现，直接用记忆库、不重新看图；超过则重新确认一次，防止群友改了用法。填 0 = 永不重新确认（最省 token）。默认 24 小时。"
+    },
+    "recheckCrossChatDays": {
+      "type": "number",
+      "label": "跨会话多久后重新确认（天）",
+      "description": "在别的群/私聊里再遇到同一个表情包时的重新确认周期（表情包通常是跨群通用的，所以默认给得更长）。默认 7 天。"
+    },
+    "skipThreshold": {
+      "type": "number",
+      "label": "跳过识图的门槛（0~1）",
+      "description": "一条消息里有多张图时，命中记忆库的比例达到这个值就整条跳过看图。0.5 = 一半以上认识就不看了。默认 0.5。"
+    },
+    "maxDownloadMs": {
+      "type": "number",
+      "label": "单次取图预算（毫秒）",
+      "description": "首见一个表情包时要下载一次算指纹。超过这个时间还没下来就本轮不拦截（照常看图，后台继续算，下次就命中了）。默认 2800 毫秒。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "sticker-memory-note",
+        "title": "表情包记忆库",
+        "priority": 44,
+        "content": "系统会把群友发过的表情包按图片指纹记进「表情包记忆库」。看过的图，下次同一张再出现时，含义会直接出现在你的上下文里（形如「[已知表情包：……]」），这时不要再调用 get_message_images / get_sticker_image 去看它 —— 系统会拦下这次调用，而且看图白花时间和 token。\n第一次看到某个表情包（上下文里没有「[已知表情包：……]」提示）、并且你确实看过它之后，请调用 remember_image 把你的理解记进记忆库，这样以后就不用再看了。记的时候写「画面里是什么 + 适合什么场合」，一句话，例如「举着白旗的道歉猫，服软/认错时用」。截图、照片、带文字的图不要记（再发一次内容可能已经变了）。\n如果群友指出某个表情包的含义记错了，用 remember_image 传新的含义覆盖它（系统会自动覆盖旧的），或者用 forget_cached_image 把它从库里删掉，等下次重新看图。"
+      }
+    ]
+  }
+}

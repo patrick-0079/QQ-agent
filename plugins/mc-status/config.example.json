@@ -1,0 +1,52 @@
+{
+  "skills": {
+    "mc-status": {
+      "enabled": true,
+      "settings": {
+        "servers": "mc.example.com:25565",
+        "source": "direct",
+        "timeout": 5000,
+        "useSrv": true,
+        "cacheSeconds": 30,
+        "cardMode": "auto",
+        "theme": "dark",
+        "apiBase": "https://api.mcsrvstat.us",
+        "apiUrl": "",
+        "customMap": "",
+        "maxCardRows": 8,
+        "trendHours": 24,
+        "adhocAllowPrivate": true,
+        "rconEnabled": true,
+        "rconHost": "",
+        "rconPort": 25575,
+        "rconPassword": "",
+        "rconTimeout": 5000,
+        "rconAllowDangerous": true,
+        "watchEnabled": false,
+        "watchGroups": "123456789",
+        "watchIntervalSec": 300,
+        "watchMode": "status",
+        "watchQuietHours": "23:00-08:00",
+        "enabled": true,
+        "useQuery": false,
+        "colorMotd": true,
+        "trendSlotMinutes": 10,
+        "trendDetailRows": 8,
+        "logSource": "http",
+        "logFilePath": "",
+        "logApiUrl": "http://mc.example.com:25585/logs?lines=200",
+        "logApiToken": "",
+        "logTimeout": 5000,
+        "logLines": 200,
+        "logMaxChars": 3000,
+        "logMaxBlocks": 5,
+        "logAdminOnly": true,
+        "logAnalyzeEnabled": false,
+        "logAnalyzeModel": "",
+        "logAnalyzeEndpoint": "",
+        "logAnalyzeApiKey": "",
+        "trendAutoEnabled": true
+      }
+    }
+  }
+}

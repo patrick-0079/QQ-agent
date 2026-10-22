@@ -1,0 +1,54 @@
+{
+  "id": "health-report",
+  "name": "体检报告",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "author": "DSH",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "description": "把「机器人现在怎么样」收进一份报告，替代一堆一次性排查脚本：扩展加载情况（可用/失败/停用）、今天运行了多少次与结果分布（done/noreply/error）、平均轮次与工具调用数、今日报错数、崩溃现场（data/logs/crash.log）、近 24 小时自动重启次数、内存与堆占用、代理与下载线路现状。每隔几小时自动追加一节到 data/reports/health-日期.md（一天一个文件），并打一条汇总日志；也可以用工具 health-report__report 随时按需生成（对机器人说「出个体检报告」即可）。所有数据都取自现有文件的最小必要读取，不联网、不额外扫描全盘。",
+  "settings": {
+    "enabled": true,
+    "intervalHours": 6,
+    "startDelaySec": 120,
+    "keepDays": 30,
+    "maxRunLines": 500
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用体检报告",
+      "description": "关掉后不再自动产出报告（工具也会提示已停用）。"
+    },
+    "intervalHours": {
+      "type": "number",
+      "label": "每隔几小时出一份",
+      "description": "默认 6 小时。报告是追加式的：一天一个文件，看一份就知道当天全程。",
+      "min": 1,
+      "max": 72
+    },
+    "startDelaySec": {
+      "type": "number",
+      "label": "启动后多少秒出第一份",
+      "description": "默认 120 秒。给程序一点时间把扩展加载完、把当天日志写出来，报告才准。",
+      "min": 5,
+      "max": 3600
+    },
+    "keepDays": {
+      "type": "number",
+      "label": "报告保留天数",
+      "description": "默认 30 天，按天清理旧报告文件。",
+      "min": 1,
+      "max": 365
+    },
+    "maxRunLines": {
+      "type": "number",
+      "label": "最多统计多少条运行记录",
+      "description": "默认 500。只统计最近这些条运行结果，避免在日志很大时翻太久。",
+      "min": 50,
+      "max": 5000
+    }
+  }
+}

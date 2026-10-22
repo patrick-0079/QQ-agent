@@ -1,0 +1,13 @@
+name: ConsoleBridge
+version: 1.0.0
+main: com.qqagent.mcbridge.ConsoleBridge
+api-version: 1.13
+author: QQ-agent
+description: 只读地把服务器日志通过 HTTP 暴露给 QQ 机器人（需要 token）
+website: 无
+
+# 权限说明：这个插件**不执行任何命令**，只提供日志读取端点。
+permissions:
+  consolebridge.admin:
+    description: 无实际用途，占位（本插件不向游戏内玩家开放任何功能）
+    default: op

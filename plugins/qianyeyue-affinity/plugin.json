@@ -1,0 +1,256 @@
+{
+  "id": "qianyeyue-affinity",
+  "name": "好感度系统",
+  "version": "2.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "Galgame 式好感度：**有加有减、六档、档位与阈值全可配**。\n\n档位（默认）：仇敌(-20) / 反派(-10) / 陌生(0，默认) / 朋友(10) / 挚友(20) / 吾爱(30)；区间 -20 ~ 30。新群友初始 0。\n\n【加分：模型判，不额外调用】系统提示词里有一段固定规则（走缓存价），让模型在回复末尾附隐藏标记 [aff+1]（夸它/道谢/好好聊天/连续互动时）。插件在**发送前**把标记剥掉（群友看不到）再记账。漏标 = 不加不减。每人每日 +2 封顶。\n\n【减分：规则判，0 token】① 擦边/血腥（复用 content-guard 判定）② 刷屏水话（只读 chatter-guard 连击计数）③ 戳一戳（poke-guard 口径）④ 超过 4 天没 @ 过它（每天凌晨的定时任务）—— 模型也可判 [aff-1]（骂它/凶它）。四条都计入每日 −2 上限。\n\n【特殊角色】主人 / 管理员（access-level ≤2）**恒满级 30，不参与任何加减**，任何规则都拉不下来。群友求\"给我加好感\"→ 按人设回绝，数值不动（提示词硬规则）。只有主人/管理员能在**私聊**手动调整：`好感 设置 <QQ|昵称> 25`、`好感 加减 <QQ|昵称> +5`。\n\n【可见性】群里 @ 它说「好感度」/「好感」→ **规则触发、0 token**，只回档位名、不回数值。升档时顺口播报（措辞挂钩新档位），降档静默，掉到最低档可配一句特殊台词。\n\n【兜底】标记格式错/漏标一律不加不减；每条规则独立开关，禁用后回到\"没装\"；存储每条 5 个字段、总条目上限 300（超了丢最久没出现的，主人/管理员永不丢）；好感变化不突破睡眠/只认@/不主动开话题这些硬闸门。",
+  "author": "千夜月official",
+  "enabledByDefault": true,
+  "capabilities": [
+    "affinity.query",
+    "affinity.set",
+    "affinity.judge",
+    "affinity.query-check",
+    "affinity.level-of",
+    "affinity.tiers"
+  ],
+  "requires": [],
+  "prompt": {
+    "sections": [
+      {
+        "id": "affinity-marker-rule",
+        "title": "好感度暗号",
+        "priority": 56,
+        "content": "【好感度暗号（隐藏标记，群友看不到）】\n每次回复的**最末尾**可以附一个隐藏标记，告诉系统\"这个人这次让你高兴/不高兴\"。系统会在发送前把它删掉，群友看不到 —— 所以**别解释它、别在正文里提它**。\n· 让你高兴 → 末尾单独一行写 [aff+1]。什么时候算高兴：夸你、说好话、认真跟你聊、跟你道谢、连续找你互动、哄你或关心你。\n· 让你不高兴 → 末尾单独一行写 [aff-1]。什么时候算不高兴：骂你、凶你、故意找茬、阴阳怪气地羞辱你。\n· 其它情况（普通问答、事务性对话、拿不准）→ **什么都不附**。\n规则：一次回复最多一个标记；必须原样写成半角 [aff+1] 或 [aff-1]；只在情绪确实有波动时才附，别每句都加；漏了没关系（系统就当这次没有变化）。"
+      }
+    ]
+  },
+  "settings": {
+    "enabled": true,
+    "masterQQ": "",
+    "admins": "",
+    "tiers": "",
+    "floor": -20,
+    "maxDailyGain": 2,
+    "maxDailyLoss": 2,
+    "maxEntries": 300,
+    "decayDays": 0,
+    "adjustViaChat": true,
+    "localSignals": false,
+    "modelGain": true,
+    "modelLoss": true,
+    "guardLoss": true,
+    "guardLossPoke": true,
+    "guardLossContent": true,
+    "guardLossChatter": true,
+    "absenceLoss": true,
+    "absenceDays": 4,
+    "absenceHour": 0,
+    "queryCommand": true,
+    "manualCommand": true,
+    "announceUp": true,
+    "announceBottom": true,
+    "lineTop": "……行吧，你在我这儿算是到头了 —— 不许得意。",
+    "lineBottom": "你自己看看你都干了什么。……我不想跟你说话。",
+    "adminAdjust": "",
+    "debugLog": false,
+    "levelUpAnnounce": true,
+    "levelUpSticker": true,
+    "levelUpStickerFile": "",
+    "cialloText": "Ciallo～(∠・ω< )⌒☆"
+  },
+  "configSchema": {
+    "masterQQ": {
+      "type": "string",
+      "label": "主人 QQ",
+      "description": "该号恒满级 30，且能在私聊里手动调整好感度。留空 = 无主人（但仍会认 access-level 的一级）。",
+      "group": "角色"
+    },
+    "admins": {
+      "type": "string",
+      "label": "管理员 QQ（逗号分隔）",
+      "description": "除主人外，同样恒满级 30、可用私聊命令调整。默认也会认 access-level 的二级。",
+      "group": "角色"
+    },
+    "tiers": {
+      "type": "string",
+      "label": "档位（名字=值，可加 @阈值）",
+      "description": "默认 吾爱=30;挚友=20;朋友=10;陌生=0;反派=-10;仇敌=-20。阈值不写就自动取相邻两档的中点（即 25/15/5/-5/-15）。想改名或加档，写成 神=40;挚友=20@14;… 即可。",
+      "group": "档位"
+    },
+    "floor": {
+      "type": "number",
+      "label": "数值下限",
+      "description": "默认 -20（上限自动 = 最高档的值，默认 30）。",
+      "group": "档位"
+    },
+    "maxDailyGain": {
+      "type": "number",
+      "label": "每人每日加分上限",
+      "description": "默认 2。含模型标记加分。",
+      "group": "每日上限"
+    },
+    "maxDailyLoss": {
+      "type": "number",
+      "label": "每人每日减分上限",
+      "description": "默认 2。模型标记、三个闸门、超时未互动全都算在这个上限里。",
+      "group": "每日上限"
+    },
+    "decayDays": {
+      "type": "number",
+      "label": "旧版冷淡衰减（天，0=关）",
+      "description": "默认 0（关）。v2 起改用下面的「超时未 @ 减分」，两者别同时开，否则一天扣两次。",
+      "group": "减分"
+    },
+    "modelGain": {
+      "type": "boolean",
+      "label": "允许模型标记加分 [aff+1]",
+      "description": "默认开。关掉后模型附了标记也不加分。",
+      "group": "加减分"
+    },
+    "modelLoss": {
+      "type": "boolean",
+      "label": "允许模型标记减分 [aff-1]",
+      "description": "默认开。",
+      "group": "加减分"
+    },
+    "guardLoss": {
+      "type": "boolean",
+      "label": "闸门命中就减分（总开关）",
+      "description": "默认开。下面三项是它的细分开关。",
+      "group": "减分"
+    },
+    "guardLossPoke": {
+      "type": "boolean",
+      "label": "　戳一戳 → −1",
+      "description": "默认开。",
+      "group": "减分"
+    },
+    "guardLossContent": {
+      "type": "boolean",
+      "label": "　擦边/血腥 → −1",
+      "description": "默认开（复用 content-guard 的判定）。",
+      "group": "减分"
+    },
+    "guardLossChatter": {
+      "type": "boolean",
+      "label": "　刷屏/水话连发 → −1",
+      "description": "默认开（只读 chatter-guard 的连击计数，不改它的状态）。",
+      "group": "减分"
+    },
+    "absenceLoss": {
+      "type": "boolean",
+      "label": "超时没 @ 它就减分",
+      "description": "默认开。每天在下面的整点跑一次。",
+      "group": "减分"
+    },
+    "absenceDays": {
+      "type": "number",
+      "label": "　超过几天没 @ 算超时",
+      "description": "默认 4 天（2026-10-09 主人指定）。只统计「@ 过它」的时间，普通发言不算。",
+      "group": "减分"
+    },
+    "absenceHour": {
+      "type": "number",
+      "label": "　每天几点跑（0-23）",
+      "description": "默认 0 点（凌晨）。",
+      "group": "减分"
+    },
+    "queryCommand": {
+      "type": "boolean",
+      "label": "群里问「好感度」直接回档位名",
+      "description": "默认开。**规则触发、0 token**：群里 @ 它说「好感度」/「好感」时，插件直接回一句档位名，不叫模型。睡眠时段不响应。",
+      "group": "可见性"
+    },
+    "manualCommand": {
+      "type": "boolean",
+      "label": "私聊手动调整命令",
+      "description": "默认开。只有主人/管理员私聊有效：`好感 设置 <QQ|昵称> 25`、`好感 加减 <QQ|昵称> +5`。",
+      "group": "可见性"
+    },
+    "announceUp": {
+      "type": "boolean",
+      "label": "升档时顺口播报",
+      "description": "默认开。降档一律静默。",
+      "group": "可见性"
+    },
+    "announceBottom": {
+      "type": "boolean",
+      "label": "掉到最低档也说一句",
+      "description": "默认开（这是降档的例外）。关掉则降档完全不说话。",
+      "group": "可见性"
+    },
+    "lineTop": {
+      "type": "string",
+      "label": "最高档台词",
+      "description": "升到最高档时让它顺口说的话（按人设，可嘴硬）。",
+      "group": "可见性"
+    },
+    "lineBottom": {
+      "type": "string",
+      "label": "最低档台词",
+      "description": "掉到最低档时说的那句。⚠️ 最低档的底线是「冷淡但不失礼」，不许骂人/人身攻击。",
+      "group": "可见性"
+    },
+    "maxEntries": {
+      "type": "number",
+      "label": "最多记多少人",
+      "description": "默认 300。超了丢「最久没出现」的；主人/管理员永不丢。",
+      "group": "存储"
+    },
+    "adjustViaChat": {
+      "type": "boolean",
+      "label": "旧能力：群里自然语言调整",
+      "description": "默认开（沿用旧版）：主人/管理员在群里说「把 1234567 好感度 +10」会被本地识别并生效，0 token。",
+      "group": "其他"
+    },
+    "localSignals": {
+      "type": "boolean",
+      "label": "旧能力：本地正则加减分",
+      "description": "默认**关**。v1 靠本地正则（@它/发图/正面词 +1，负面词/欺负 −1）算分；v2 改成模型标记后默认关掉，避免和新机制重复计分。",
+      "group": "其他"
+    },
+    "adminAdjust": {
+      "type": "string",
+      "label": "设置页批量调整",
+      "description": "格式：QQ号:+10 或 QQ号:25（设为绝对值），多个用分号分隔；QQ号可写「主人」。保存后生效一次，用完请清空。",
+      "group": "其他"
+    },
+    "debugLog": {
+      "type": "boolean",
+      "label": "排障日志",
+      "description": "默认关。开启后每次钩子追加一行到 data/affinity-hook.log（超过 512KB 自动清空）。",
+      "group": "其他"
+    },
+    "levelUpAnnounce": {
+      "type": "boolean",
+      "label": "升档播报（表情包 + Ciallo）",
+      "description": "默认开。只有**正向升档**时发：文案（机器人自己那句）→ 表情包 → Ciallo。降档/平档/日常互动都不发；每人每天最多一次；睡眠时段直接丢弃。关掉后只记档位、不播报。",
+      "group": "升档播报"
+    },
+    "levelUpSticker": {
+      "type": "boolean",
+      "label": "　发那张表情包",
+      "description": "默认开。图片放插件目录 assets/levelup.png（jpg/gif/webp 也行）；**文件缺失会自动降级为只发 Ciallo**，不报错。关掉 = 只发 Ciallo 那句。",
+      "group": "升档播报"
+    },
+    "levelUpStickerFile": {
+      "type": "string",
+      "label": "　表情包路径（留空=自动找）",
+      "description": "留空即自动找 assets/levelup.(png|jpg|jpeg|gif|webp)；也可填相对本插件目录的路径或绝对路径。",
+      "group": "升档播报"
+    },
+    "cialloText": {
+      "type": "string",
+      "label": "　升档时说的那句",
+      "description": "默认 Ciallo～(∠・ω< )⌒☆。可以改成任意一句话。",
+      "group": "升档播报"
+    },
+    "enabled": {
+      "type": "boolean",
+      "label": "好感度总开关",
+      "description": "关闭后不记录、不改分、不播报。"
+    }
+  }
+}

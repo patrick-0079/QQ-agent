@@ -1,0 +1,42 @@
+{
+  "id": "office-export",
+  "name": "文件导出（Excel / Word / PPT / TXT / CSV）",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "让机器人真的能产出 .xlsx / .docx / .pptx / .csv / .txt 并直接发到聊天里：模型给出表格数据、段落结构、幻灯片大纲或纯文本，技能生成**原生文件**（不是文本改后缀；CSV 还会自动加 UTF-8 BOM 让 Excel 不乱码），再通过协议端把文件发出去。带文件名清洗、体积上限和目录限制。",
+  "author": "本地生成",
+  "enabledByDefault": true,
+  "requires": [],
+  "permissions": [],
+  "capabilities": [],
+  "settings": {
+    "autoSend": true,
+    "maxFileMB": 12,
+    "exportDir": "",
+    "fileNamePrefix": ""
+  },
+  "configSchema": {
+    "autoSend": {
+      "type": "boolean",
+      "label": "生成后自动发到当前会话",
+      "description": "开着（默认）：生成完直接把文件发出来，模型不用再调发送工具。关掉：只生成并返回文件路径（适合先预览再手动发）。"
+    },
+    "maxFileMB": {
+      "type": "number",
+      "label": "文件体积上限（MB）",
+      "description": "默认 12。超过就不自动发送（文件仍会保留在导出目录），避免把 QQ 的上传卡死。"
+    },
+    "exportDir": {
+      "type": "string",
+      "label": "导出目录（可空）",
+      "description": "留空 = 程序数据目录下的 exports 文件夹。填绝对路径可改到别处；技能只会往这个目录里写文件。"
+    },
+    "fileNamePrefix": {
+      "type": "string",
+      "label": "文件名前缀（可空）",
+      "description": "给所有生成的文件加个前缀，例如「小鲸鱼-」。留空 = 不加。"
+    }
+  },
+  "prompt": null
+}

@@ -1,0 +1,46 @@
+{
+  "id": "member-aliases",
+  "name": "群友外号对照",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "entry": "index.js",
+  "description": "把群友的外号/别名喂给模型：谁说话时告诉他这人还叫什么，别人提到外号时告诉他指的是谁。外号在「记忆 → 群成员列表 → 编辑外号」里改。纯 hooks，不花 token（只在命中时加几行）。",
+  "author": "QQ Agent（迁移自 0.2 的 memberAliases）",
+  "enabledByDefault": true,
+  "capabilities": [
+    "member.alias-list",
+    "member.alias-set",
+    "member.alias-match"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "scanMentions": true,
+    "maxLines": 12,
+    "aliasesFile": "member-aliases.json"
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用外号对照",
+      "description": "关掉后不再往提示词里加称呼对照；外号文件保留。"
+    },
+    "scanMentions": {
+      "type": "boolean",
+      "label": "识别「别人提到外号」",
+      "description": "本轮消息里出现了某人的外号（说话的不是他本人）时，也加一行说明指的是谁。"
+    },
+    "maxLines": {
+      "type": "number",
+      "label": "每轮最多几行",
+      "description": "防止外号表很大时把提示词撑长，默认 12 行。"
+    },
+    "aliasesFile": {
+      "type": "string",
+      "label": "外号数据文件（data 目录下）",
+      "description": "默认 member-aliases.json。外号不在这里改 —— 去「记忆 → 群成员列表 → 编辑外号」，那里能看到群名片和昵称，不会填错 QQ 号。这一项只决定文件放哪。"
+    }
+  },
+  "prompt": null
+}

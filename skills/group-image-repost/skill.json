@@ -1,0 +1,73 @@
+{
+  "id": "group-image-repost",
+  "name": "群图转发",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "index.js",
+  "category": "media",
+  "description": "把群友发过的图片/表情包**原样再发一次**（复读、接梗、用群友的图回敬群友）。\n\n【为什么需要它】机器人本来只能「看」群里的图（get_message_images），却没有办法把别人发的那张图再发出去 —— 想复读一张图只能干瞪眼。本技能补上这一环。\n\n【怎么用】装上即生效，不用配置。模型侧：先 list_group_images 看这个会话最近有谁发过图（带 #消息号），再用 repost_image 传消息号把其中一张发出去。\n\n【安全边界】默认只转发最近 60 分钟内的图（更旧的是 QQ 临时链接，发出去会变裂图）；默认不转发机器人自己发过的图（防止「自己发→看到自己发→再发」的自嗨循环）；私聊照片、截图这类可能涉及隐私的图，工具说明里明确要求模型先征得同意再转。",
+  "author": "DSH",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "permissions": ["web_fetch"],
+  "settings": {
+    "enabled": true,
+    "maxLookback": 60,
+    "maxItems": 12,
+    "includeSelf": false,
+    "maxAgeMin": 60,
+    "defaultReply": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用群图转发",
+      "description": "关掉后两个工具立刻失效，模型就再也转发不了群里的图（看图和发图的核心能力不受影响）。"
+    },
+    "maxLookback": {
+      "type": "number",
+      "label": "回看多少条消息",
+      "description": "list_group_images 最多往回想多少条聊天记录来找图，默认 60 条。调大能翻到更早的图，但每条都要扫一遍媒体字段。",
+      "min": 10,
+      "max": 300,
+      "step": 10
+    },
+    "maxItems": {
+      "type": "number",
+      "label": "最多列出几张",
+      "description": "一次列给模型看多少条「带图的消息」，默认 12。列太多会占满上下文，翻页用 offset。",
+      "min": 1,
+      "max": 40,
+      "step": 1
+    },
+    "includeSelf": {
+      "type": "boolean",
+      "label": "允许转发自己发过的图",
+      "description": "默认关闭。开着的话模型可以把机器人自己之前发的图再发一次 —— 一般没必要，而且容易变成自嗨循环。"
+    },
+    "maxAgeMin": {
+      "type": "number",
+      "label": "只转发最近多少分钟内的图（0 = 不限）",
+      "description": "默认 60 分钟。QQ 发的图片链接带 rkey 会过期，转过旧的图发出去会变成裂图，所以默认只转新鲜的。填 0 = 不限制（旧图可能失败）。",
+      "min": 0,
+      "max": 1440,
+      "step": 10
+    },
+    "defaultReply": {
+      "type": "boolean",
+      "label": "默认引用原消息",
+      "description": "开启后转发图片时会带上「引用回复」指向原消息，群友一眼能看出复读的是谁那张。工具参数里也能单独覆盖。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "group-image-repost-rules",
+        "title": "群图转发",
+        "priority": 52,
+        "content": "你可以把群友刚发过的图片/表情包**原样再发一次**（工具 list_group_images 先看有哪些、repost_image 再发）。\n- 什么时候用：① 群里两个人发了同一张图，你想跟着复读；② 别人的图正好能接你的话（吐槽、附和、认输）；③ 有人发图挑衅/开玩笑，你用他这张图回敬他。\n- 先看再发：不确定「这个会话最近有什么图」就先 list_group_images；聊天记录里消息前面已经写了 #消息号，图片消息显示成 [图片]，你可以直接按那个号转发。\n- **别当复读机**：同一张图别反复发（核心发送管道会按图去重，重复发会被拦下并报错，那是保护不是故障）；一次会话里用一两次就够，刷图比刷屏更烦人。\n- **隐私这条不能越**：别人的自拍、私人照片、聊天截图、证件/二维码这类图，**默认不转发**；真想用就先用文字问一句，对方同意再发。表情包、梗图、网图随便转。\n- 转发的图是独立气泡，不能和图外文字同气泡：想说话就先用 send_message，再决定要不要配一张图。"
+      }
+    ]
+  }
+}

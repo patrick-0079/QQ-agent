@@ -1,0 +1,237 @@
+{
+  "id": "sing-aloud",
+  "name": "唱歌（念唱·翻唱）",
+  "version": "0.9.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "用户点歌时，用自己现写的原创短歌词合成一条语音消息发到当前会话（阶段1：自动带程序化伴奏混音；阶段2：曲库翻唱点歌，旋律线画进伴奏）。另有 sing_cover 工具：对歌曲做人声翻唱（demucs+Seed-VC/SoulX 换声+混音，声库=小鲸鱼参考音频），支持三入口——本机文件 path、按歌名 song（网易云音乐优先→Audius→ccMixter 兜底）、按风格 query（ccMixter CC 曲库）。默认 engine=voxcpm：VoxCPM2 声库克隆整首一次合成；可切回 sapi 离线念唱（免联网）。",
+  "author": "QQ Agent 用户",
+  "enabledByDefault": true,
+  "settings": {
+    "engine": "voxcpm",
+    "refAudio": "",
+    "apiBase": "https://openbmb-voxcpm-demo.hf.space",
+    "voxControl": "",
+    "voxCfg": 2,
+    "voxTimeoutSec": 120,
+    "voice": "Microsoft Huihui Desktop",
+    "rate": 2,
+    "volume": 100,
+    "maxChars": 160,
+    "maxLines": 8,
+    "gapMs": 260,
+    "cooldownSec": 60,
+    "delivery": "record",
+    "dryRun": false,
+    "accompaniment": true,
+    "melodyTune": true,
+    "style": "pop",
+    "bpm": 0,
+    "accVolume": 0.45,
+    "vocalVolume": 1,
+    "ffmpegPath": "",
+    "songbookPath": "",
+    "coverEngine": "soulx",
+    "coverTimeoutSec": 2400,
+    "coverCooldownSec": 120,
+    "coverPyPath": "",
+    "coverPythonPath": ""
+  },
+  "configSchema": {
+    "engine": {
+      "type": "enum",
+      "values": [
+        "voxcpm",
+        "sapi"
+      ],
+      "label": "合成引擎",
+      "description": "voxcpm = VoxCPM2 声库克隆（联网，音色=参考音频 assets/reference.wav，默认）；sapi = 离线 Windows SAPI 念唱（免联网，音色看下面「音色」设置）。"
+    },
+    "refAudio": {
+      "type": "string",
+      "label": "声库参考音频",
+      "description": "克隆音色用的 wav/mp3 绝对路径（建议 ≤50 秒）。留空 = 用 voxcpm-voice 技能自带的 assets/reference.wav（本地声库）。"
+    },
+    "apiBase": {
+      "type": "string",
+      "label": "VoxCPM 服务地址",
+      "description": "默认 HuggingFace Space：https://openbmb-voxcpm-demo.hf.space 。自建服务后改这里。"
+    },
+    "voxControl": {
+      "type": "string",
+      "label": "声库语气提示",
+      "multiline": true,
+      "description": "可留空。传给 VoxCPM 的风格指令，例如「像唱歌一样有旋律地唱出来，节奏轻快」。不填则按普通朗读合成。"
+    },
+    "voxCfg": {
+      "type": "number",
+      "label": "CFG 引导强度",
+      "min": 1,
+      "max": 3,
+      "step": 0.1,
+      "description": "1.0~3.0，默认 2.0。越高越贴近参考音频音色，越低风格越自由。"
+    },
+    "voxTimeoutSec": {
+      "type": "number",
+      "label": "声库合成超时（秒）",
+      "min": 15,
+      "max": 600,
+      "step": 15,
+      "description": "engine=voxcpm 时单次合成等待上限，默认 120 秒（Space 冷启动/排队时可能更久）。"
+    },
+    "voice": {
+      "type": "string",
+      "label": "音色（engine=sapi 时）",
+      "description": "Windows SAPI 音色真名。默认 Microsoft Huihui Desktop（系统自带中文女声）。不存在的音色会报错并列出可用清单。"
+    },
+    "rate": {
+      "type": "number",
+      "label": "语速（engine=sapi 时）",
+      "description": "-10 ~ 10，0 正常。唱歌默认 2（稍快更像唱）。"
+    },
+    "volume": {
+      "type": "number",
+      "label": "音量（engine=sapi 时）",
+      "description": "0 ~ 100，默认 100。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "歌词字数上限",
+      "description": "超过就在标点处截断。默认 160（sapi 约 40 秒、voxcpm 约 55 秒语音）。"
+    },
+    "maxLines": {
+      "type": "number",
+      "label": "歌词行数上限",
+      "description": "默认 8 行，超出丢弃并提示。"
+    },
+    "gapMs": {
+      "type": "number",
+      "label": "句间停顿（engine=sapi 时）",
+      "description": "每行合成完插一段静音，制造「一句一句唱」的节奏感。默认 260。voxcpm 整首一次合成，此设置不生效。"
+    },
+    "cooldownSec": {
+      "type": "number",
+      "label": "冷却（秒）",
+      "description": "同一会话两次唱歌的最小间隔，防刷屏。默认 60，填 0 = 不冷却。"
+    },
+    "delivery": {
+      "type": "enum",
+      "values": [
+        "record",
+        "file"
+      ],
+      "label": "投递方式",
+      "description": "record = 语音气泡（wav/mp3 均已实测可用，协议端自动转 silk）；file = 当文件发（兜底）。默认 record。"
+    },
+    "dryRun": {
+      "type": "boolean",
+      "label": "演练模式",
+      "description": "开着时照常合成但不发送，只报告时长。调音色时先开，确认后关掉。默认关闭。"
+    },
+    "accompaniment": {
+      "type": "boolean",
+      "label": "程序化伴奏",
+      "description": "开启后自动为歌声混入 Node 合成的伴奏（和弦垫底+bass+鼓点，零素材文件零版权风险）。ffmpeg 缺失时自动跳过、只发人声。默认开启。"
+    },
+    "melodyTune": {
+      "type": "boolean",
+      "label": "旋律贴合",
+      "description": "点曲库的歌时，把人声音高逐音符拉到歌谱上 —— 保证「唱出旋律」，代价是明显的电音/机器人唱腔听感。关掉 = 原样人声（可能听起来像念）。"
+    },
+    "style": {
+      "type": "enum",
+      "values": [
+        "pop",
+        "chill",
+        "ballad"
+      ],
+      "label": "伴奏风格",
+      "description": "pop = 流行（C G Am F，96 BPM，带 kick/snare/hi-hat）；chill = 轻松（Am F C G，84 BPM，只有轻 hat）；ballad = 抒情（C Em F G，72 BPM，无鼓、分解和弦）。默认 pop。"
+    },
+    "bpm": {
+      "type": "number",
+      "label": "伴奏 BPM（0=按风格默认）",
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "description": "伴奏速度。0 = 用风格自带默认（pop 96 / chill 84 / ballad 72）。人声不会变速，调 BPM 只改伴奏。"
+    },
+    "accVolume": {
+      "type": "number",
+      "label": "伴奏音量",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "description": "混音时伴奏的增益，默认 0.45（人声 1.0 为主）。"
+    },
+    "vocalVolume": {
+      "type": "number",
+      "label": "人声音量",
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "description": "混音时人声的增益，默认 1.0。"
+    },
+    "ffmpegPath": {
+      "type": "string",
+      "label": "ffmpeg 路径",
+      "description": "留空 = 自动找 data\\vendor\\ffmpeg\\ffmpeg.exe（已内置 b6.1.1），再退 PATH。只有换安装位置才需要填。"
+    },
+    "songbookPath": {
+      "type": "string",
+      "label": "曲库文件（自建翻唱歌单）",
+      "description": "自建曲库 JSON 绝对路径（与内置 songbook.json 合并，同名以自建为准）。条目 {name, aliases?, lyrics[], style?, melody?}，melody=[midi,起始拍,时值拍][]。留空 = 只用内置公有领域曲库。歌词权利由你自己保证。"
+    },
+    "coverEngine": {
+      "type": "enum",
+      "values": [
+        "soulx",
+        "seedvc"
+      ],
+      "label": "翻唱引擎（sing_cover）",
+      "description": "soulx = SoulX-Singer SVC（改动更深，自动对齐音域）；seedvc = Seed-VC 44k（改动温和）。工具调用时也可临时指定。"
+    },
+    "coverTimeoutSec": {
+      "type": "number",
+      "label": "翻唱超时（秒）",
+      "min": 60,
+      "max": 10800,
+      "step": 60,
+      "description": "单次翻唱管线等待上限，默认 2400 秒（GTX1060 上约 2.4 秒/歌曲秒，3 分钟歌约 9 分钟）。超时会杀掉整个进程树。"
+    },
+    "coverCooldownSec": {
+      "type": "number",
+      "label": "翻唱冷却（秒）",
+      "min": 0,
+      "max": 3600,
+      "step": 30,
+      "description": "两次翻唱的最小间隔（GPU 重活），默认 120，填 0 = 不冷却。与普通唱歌冷却分开计算。"
+    },
+    "coverPyPath": {
+      "type": "string",
+      "label": "cover.py 路径",
+      "description": "翻唱管线脚本绝对路径。留空 = F:\\1梁晨\\大肥鱼工作区\\_tools\\cover.py（已含环境变量自足化）。"
+    },
+    "coverPythonPath": {
+      "type": "string",
+      "label": "翻唱 Python 路径",
+      "description": "跑 cover.py 的 python.exe 绝对路径。留空 = F:\\1梁晨\\大肥鱼工作区\\_rvc_env\\Scripts\\python.exe（含 torch cu118/demucs/librosa）。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "sing-aloud-rules",
+        "title": "唱歌",
+        "content": "【唱歌】①点名歌曲（唱首《X》／来首X／唱X）→ 调 sing 传 title=X，歌词和旋律都从曲库取，**别再写 lyrics**；②没点名（唱首歌／来首歌／唱一个）→ 自己写 4-8 行**原创**短歌词传 lyrics（不许抄现有歌曲的词，押韵更好）；③title 报「曲库里没有《X》」时，按它给的可唱清单换一个歌名重试一次，或改用 lyrics 唱原创；④调用后直接结束这一轮，**不要再用 send_message 补文字**（语音本身就是回复）；⑤status 是 cooling 时一句自嘲带过，别道歉别重试；⑥status 是 error 时改用文字回应（俏皮话兜住），重试最多一次。",
+        "priority": 60
+      },
+      {
+        "id": "sing-cover-rules",
+        "title": "翻唱（真实歌曲）",
+        "content": "【翻唱】①用户要翻唱且给了本机音频文件路径 → 调 sing_cover 传 path=文件绝对路径；②用户说了具体歌名（翻唱《Faded》／把《晴天》翻唱一下）→ 调 sing_cover 传 song=歌名（工具全网按歌名搜最匹配的版本再翻唱）；③用户没给文件没给歌名、只说风格（如「找首摇滚翻唱」）→ 调 sing_cover 传 query=风格关键词（CC 免版权曲库）；④都没有（只说「翻唱一下」）→ 先问用户想要哪首歌/什么风格；回复里都带原曲署名信息（歌曲名/歌手/来源），对外传播须保留署名；⑤工具很慢（约歌长×3，搜歌还要加下载时间），调用前先 send_message 说「正在找歌/翻唱，需要几分钟，做好了发你」，调用结束后**不要补文字**；⑥status=cooling 一句带过别重试；⑦status=error 用文字回应原因（没搜到歌/文件不存在/格式不支持/超时等），重试最多一次（换个歌名或关键词）；⑧普通念唱点歌（唱首歌/唱首《X》想听念唱版）仍然用 sing 工具，别混用。",
+        "priority": 60
+      }
+    ]
+  }
+}

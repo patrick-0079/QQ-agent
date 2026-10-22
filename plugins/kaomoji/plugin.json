@@ -1,0 +1,60 @@
+{
+  "id": "kaomoji",
+  "name": "颜文字点缀",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "在合适的时候，偶尔（整体约 5%，对主人 20%）在发出的消息末尾带一个颜文字。只在发送前做加法、不改原意；消息太长、多行、含链接或严肃内容时自动跳过。",
+  "author": "QQ Agent 用户",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": true,
+  "capabilities": ["llm.response"],
+  "settings": {
+    "enabled": true,
+    "overallPercent": 5,
+    "ownerPercent": 20,
+    "maxChars": 60,
+    "kaomojiList": "(｡•̀ᴗ-)✧|(≧▽≦)|(｡･ω･｡)|(๑•̀ㅂ•́)و✧|(￣▽￣)|(・∀・)|(｀・ω・´)|(๑´ㅂ`๑)|( ˘ω˘ )|(｡>ㅅ<｡)|(＾▽＾)|(●'◡'●)|(✿◡‿◡)|(｡◕‿◕｡)|ヾ(≧▽≦*)o|(´･ω･`)|( ╹▽╹ )|(＾ω＾)|(｡・ω・｡)ﾉ|(￣ω￣;)",
+    "avoidWords": "生病,医院,去世,死了,难过,想哭,报警,投诉,抱歉,对不起,生气,分手,抑郁,自杀,救命,住院,手术"
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用颜文字点缀",
+      "description": "总开关。关闭后本插件完全不做事，行为与未安装时一致。"
+    },
+    "overallPercent": {
+      "type": "number",
+      "label": "整体概率（%）",
+      "description": "普通聊天每轮收尾消息被加颜文字的概率。默认 5。",
+      "min": 0,
+      "max": 100
+    },
+    "ownerPercent": {
+      "type": "number",
+      "label": "对主人概率（%）",
+      "description": "在私聊里对主人说话时的概率。默认 20。",
+      "min": 0,
+      "max": 100
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "最长加字消息（字）",
+      "description": "超过这个字数的消息不加颜文字（长文/小作文加了不像真人）。默认 60。",
+      "min": 10,
+      "max": 300
+    },
+    "kaomojiList": {
+      "type": "string",
+      "label": "颜文字池",
+      "description": "用 | 或逗号分隔，随机挑一个。留空 = 用默认池。"
+    },
+    "avoidWords": {
+      "type": "string",
+      "label": "跳过关键词",
+      "description": "逗号分隔。消息里出现这些词（严肃/难过/求助）时不加颜文字。留空 = 不按关键词过滤。"
+    }
+  },
+  "prompt": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "sticker-cap",
+  "name": "表情包库上限（防撑爆）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "entry": "index.js",
+  "description": "防止有人一直发表情包让它收，把库和磁盘撑爆。\n\n【使用者原话】「设这个的目的是防止有人一直发表情包让它存然后炸掉」\n\n【核心已有的闸门 —— 只防频率，不防总量】\n· `sticker.maxCollectPerHour` = 10 → 每小时最多收 10 张 ✓\n· `sticker.promptMaxStickers` = 10 → 只把 10 张写进提示词 ✓\n· **总量上限：没有** ✗\n\n【实测风险】库在 `data/sticker-images/`，当前 20 张 / 17.2 MB，\n单张中位 513 KB、最大 2.81 MB ✗ → 按 10 张/小时能堆 **约 5 MB/小时、一天 100+ MB** ✗\n\n【这道闸做什么】收表情包之前先量一下库：**张数或总大小任一超上限，就拒绝收**，\n并把结果告诉模型（它会说「库满了，先清理」而不是硬塞）。\n已经在库里的**不动、不删** ✓（只拦新增）\n\n【量什么】\n· 张数（`data/sticker-images/` 里的文件数）\n· 总大小（MB）\n· 结果缓存 10 秒，避免每次调用都扫目录\n\n【不改核心】只挂钩子（`before-tool`），核心一行不用动 ✓",
+  "author": "为 QQ Agent 定制",
+  "enabledByDefault": true,
+  "capabilities": [
+    "sticker-cap.status"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "maxCount": 200,
+    "maxMB": 200,
+    "blockedIds": ""
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用表情包库上限",
+      "description": "总开关。关掉后只受核心的「每小时 10 张」限制，库会一直长大。",
+      "group": "开关"
+    },
+    "maxCount": {
+      "type": "number",
+      "label": "最多多少张",
+      "description": "默认 200。到上限后不再收新的（已有的不动）。按当前单张中位 513 KB 算，200 张约 100 MB。",
+      "group": "上限"
+    },
+    "maxMB": {
+      "type": "number",
+      "label": "最多占多少 MB",
+      "description": "默认 200 MB。和张数上限哪个先到算哪个 —— 这条更保险，因为单张大小差别很大（实测最大 2.81 MB）。",
+      "group": "上限"
+    },
+    "blockedIds": {
+      "type": "string",
+      "label": "★永久剔除名单（表情包 id）",
+      "description": "填进来的 id 永远不收/不显示，逗号分隔。⚠️ 为什么需要它：表情包的**源头在 QQ 收藏**，核心每次同步会把 QQ 的列表并回本地 —— 实测只删本地的话，一次同步 6 条全部回来了 ✗ 所以本插件包在同步之后按这个名单过滤再写回 ✓ 现在里面是「只要使用者要求收藏的那批」之外被清掉的 6 条。",
+      "group": "上限"
+    }
+  },
+  "_note_tools_is_metadata": "本插件不注册工具，只挂钩子。",
+  "tools": []
+}

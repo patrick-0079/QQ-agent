@@ -1,0 +1,81 @@
+{
+  "id": "minecraft-master",
+  "name": "我的世界大师",
+  "version": "1.3.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "description": "让机器人成为《我的世界》行家：能查中文 Wiki（zh.minecraft.wiki）的任意条目（方块 / 物品 / 生物 / 附魔 / 红石 / 结构 / 版本更新 / 指令），内置离线速查库（生存流程、资源与合成、附魔酿造、红石装置、生物打法、常用指令、Java/基岩/网易版差异、梗与黑话、游戏内梗、圈子与主播梗、官方彩蛋与出处，共 200+ 条梗收录），能搜 B 站教程与攻略并按「播放 + 投币 + 收藏」综合只挑一个最优的，被叫到时还能自然接住 MC 梗。默认【被 @ 或戳一戳才启用】——不被叫到时连工具都不出现，不占提示词。",
+  "author": "AI 生成 · 资料来自 zh.minecraft.wiki 与萌娘百科（已改写为速查条目）",
+  "enabledByDefault": true,
+  "permissions": [
+    "web_fetch"
+  ],
+  "settings": {
+    "triggerMode": "被@或戳一戳时",
+    "graceMinutes": 3,
+    "allowNetwork": true,
+    "maxPageChars": 3000,
+    "searchLimit": 5,
+    "biliCandidates": 8,
+    "memeEnabled": true,
+    "includeSource": true
+  },
+  "configSchema": {
+    "triggerMode": {
+      "type": "enum",
+      "values": [
+        "被@或戳一戳时",
+        "聊到我的世界时",
+        "总是"
+      ],
+      "label": "什么时候启用",
+      "description": "默认「被@或戳一戳时」：只有群友 @ 机器人、拍一拍或私聊时，这些工具与大师提示词才生效，平时完全不打扰（也不占提示词）。「聊到我的世界时」：群里只要聊到 MC / 我的世界 / 苦力怕 / 红石这类词就自动启用。「总是」：任何时候都可用。"
+    },
+    "graceMinutes": {
+      "type": "number",
+      "min": 0,
+      "max": 30,
+      "label": "被叫到后的宽限时间（分钟）",
+      "description": "被 @ 之后这段时间内，同一个群里的后续追问仍然算「刚才叫过你」（默认 3 分钟）。填 0 = 每条消息都要重新 @。私聊不受此限制。"
+    },
+    "allowNetwork": {
+      "type": "boolean",
+      "label": "允许联网查 MC Wiki / B 站",
+      "description": "开启后可以实时检索 zh.minecraft.wiki、搜索 B 站视频；关闭后只用内置速查库回答（生存流程、合成、附魔、红石、生物、指令、版本差异、梗都能离线用），但具体条目的最新数据与视频搜索会停用。"
+    },
+    "maxPageChars": {
+      "type": "number",
+      "min": 500,
+      "max": 12000,
+      "label": "单次返回正文上限（字符）",
+      "description": "联网读取 Wiki 页面时最多回给模型多少字符，默认 3000。越大越详细，也越费 token。"
+    },
+    "searchLimit": {
+      "type": "number",
+      "min": 1,
+      "max": 10,
+      "label": "Wiki 默认检索条数",
+      "description": "wiki_search 默认返回几条结果，默认 5。范围 1~10。"
+    },
+    "biliCandidates": {
+      "type": "number",
+      "min": 1,
+      "max": 10,
+      "label": "B 站候选池大小",
+      "description": "B 站搜索只发一个视频，但会先取这么多候选来比较播放 / 投币 / 收藏（默认 8）。范围 1~10：越大越可能挑到更好的，也更慢（每个候选都要多取一次详情）。"
+    },
+    "memeEnabled": {
+      "type": "boolean",
+      "label": "允许接 MC 梗",
+      "description": "开启后，被叫到的那一轮里可以自然接《我的世界》的梗（苦力怕、挖三填一、下界合金、村民提款机、这不是 bug 是特性…）。只是「可以用」，不会硬塞；关掉则只谈正事。"
+    },
+    "includeSource": {
+      "type": "boolean",
+      "label": "资料里附 Wiki 链接",
+      "description": "开启后工具返回的资料会带上 zh.minecraft.wiki 的来源链接，方便群友自己去看原页面（配方表、数据表这类内容 Wiki 上更完整）。"
+    }
+  },
+  "capabilities": [
+    "tool.guard"
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "id": "meme-mood",
+  "name": "心情表情",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "让机器人按自己的心情，从**自己收藏的表情**里挑一张发出去。收藏是 meme-taste 一张张按口味收进来的，这里有心情时就从里面挑最贴的那张发（GIF 动图会原样发出去，QQ 里自己会动），并且会记得别连着发同一张。频率由你定：本会话每小时几张、每天几张、所有会话加起来每小时几张、两张之间至少隔几分钟 —— 都在本页设置里改，改完立即生效，不用重启。额度用完时她会如实说发不了，不会假装发了。数据放在 data/meme-mood/，删掉那个文件夹就等于清空发表情记录。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "permissions": [],
+  "settings": {
+    "enabled": true,
+    "sending": true,
+    "perChatPerHour": 4,
+    "perChatPerDay": 15,
+    "globalPerHour": 30,
+    "minGapMin": 3,
+    "repeatCooldownMin": 180,
+    "hint": true
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用心情表情",
+      "description": "关掉之后她不再主动发表情，本页的频率设置也一并失效（收藏功能不受影响，那是「表情品味」的事）。"
+    },
+    "sending": {
+      "type": "boolean",
+      "label": "允许主动发表情",
+      "description": "开着：她自己有情绪时可以主动配一张。关掉：只有别人点名要图（「来张表情包」）时才会发。"
+    },
+    "perChatPerHour": {
+      "type": "number",
+      "label": "每个会话每小时最多发几张",
+      "description": "按会话单独算。默认 4。填 0 = 这个技能完全不主动发（等于关掉主动发表情）。这是控制「话痨程度」最直接的一个数。"
+    },
+    "perChatPerDay": {
+      "type": "number",
+      "label": "每个会话每天最多发几张",
+      "description": "按会话单独算，默认 15。防止某个群被她刷屏。"
+    },
+    "globalPerHour": {
+      "type": "number",
+      "label": "所有会话加起来每小时最多几张",
+      "description": "默认 30。跨群的总闸，防止她在多个群同时活跃时总量失控。"
+    },
+    "minGapMin": {
+      "type": "number",
+      "label": "两张之间至少隔几分钟",
+      "description": "默认 3。填 0 = 不限制间隔。调大就稀疏，调小就密集。"
+    },
+    "repeatCooldownMin": {
+      "type": "number",
+      "label": "同一张多久内不再发",
+      "description": "默认 180（3 小时）。同一个会话里刚发过的图会进冷却，避免连着刷同一张；填 0 = 不限制。"
+    },
+    "hint": {
+      "type": "boolean",
+      "label": "提醒她还有额度",
+      "description": "开着：还有额度时会把「这一轮可以配图」递到她眼前（最多 20 分钟一次），发不发仍然由她自己判断。关掉后主动配图基本不会发生，只有被点名时才发。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "meme-mood-playbook",
+        "title": "心情表情（按自己的心情发自己收的表情）",
+        "priority": 52,
+        "content": "你有一个自己一张张收来的表情收藏夹（「表情品味」收的那些）。想让一句话更有活人味时，可以从里面挑一张发出去 —— 这是**表情**，不是配图：一条消息只能是一张表情，不能在同一气泡里附带文字；想说的话先用 send_message 单独发，再单独发表情。\n\n发之前先想清楚两件事：① 这句话本身有没有情绪（接梗、吐槽、无语、得意、委屈、被催、晚安…）；② 我的收藏里有没有真的对得上这个语气的。两个都成立才发；对方在认真问事、话题很正经、或者你刚发过图，就照常说话，**不发完全正常**。\n\n挑图用 `meme-mood__browse_mine`（可以按心情筛，会列出候选和剩余额度），看中哪张就把 stickerId 交给 `meme-mood__send_by_mood`；不想先看候选，直接给 `send_by_mood` 填一个 mood 短词也行，它会自己在收藏里找最贴的一张。不确定某张图到底画的什么，就先看图再决定，别瞎发。\n\n频率有硬额度（本页设置里能改）：额度用完时工具会拒绝你，那就别发；发过不久的同一张也在冷却里，换一张或干脆不发。发出去之后不要在回复里描述图里画的是什么，一两句话带过就行。别自己编图 —— 收藏里没有就直说没有。"
+      }
+    ]
+  }
+}

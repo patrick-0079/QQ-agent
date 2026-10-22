@@ -1,0 +1,37 @@
+{
+  "id": "sticker-send-as-emoji",
+  "name": "表情按「表情」发（不再发成大图）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "entry": "index.js",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "permissions": [],
+  "capabilities": [
+    "sticker-send-as-emoji.status"
+  ],
+  "description": "让机器人发的表情**以「表情」的形式出现**（小图、可长按收藏），而不是一张撑满气泡的大图。\n\n【问题是什么】QQ 的消息里，图片分两种，靠一个叫 sub_type 的字段区分：sub_type=0 是普通图片（客户端按原图尺寸渲染，1080×1080 的表情库图就变成一张大图）；sub_type=1 才是「表情」（客户端按表情渲染，小而紧凑）。本项目发送表情的代码（src/onebot.js 的 sendSticker）只发了图片本体、**从来没有带过这个字段**，于是协议端一律按 0 处理 —— 这就是「机器人发表情等于发大图」的根因。\n\n【怎么确认的】不是猜的。用机器人收到过的真实消息回读协议端数据，对照如下：普通图片 [图片] → sub_type=0；好友发的收藏表情 [动画表情] → sub_type=1；商城表情（另有 emoji_id/emoji_package_id 的那类）→ sub_type=0 但带表情包字段。再实测发送：同一张图不带字段发出去，回读是 sub_type=0；带上 sub_type=1 发出去，回读就是 sub_type=1 —— 协议端确实接受并保留了它。\n\n【本插件做什么】在「发表情」这条路径上补上 sub_type=1。拦截点选在 OneBotClient.prototype.sendSticker（全项目发表情只有这一个出口：内置工具 send_sticker → sender.sendSticker → 这里，连它内部的多次失败重试也都走这里），所以一处生效、全覆盖。**只影响发表情**：sendImage（发一张图）和 sendText 都不动，图片依然是图片。\n\n【为什么是插件不是直接改核心】两点很实在：① src/ 是核心代码，改了要**重启应用**才生效；插件热重载**立即生效**。② 应用升级/覆盖安装会替换 resources/app，核心里的改动会**被冲掉**（表现是「用了一阵子又变大图了」，且毫无线索）；插件目录不在安装清单里，升级不丢。\n\n【安全性】不联网、不改任何文件、不碰协议连接。只在一个消息段的 data 里加一个数字字段，且加之前会检查是不是图片段、是否已经带了该字段（已有就不覆盖）。异常一律放行 —— 宁可这次发成图片，也绝不让机器人发不出表情。",
+  "settings": {
+    "enabled": true,
+    "subType": 1,
+    "debug": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用",
+      "description": "默认**开**。关上后恢复原样：机器人发的表情又会变回撑满气泡的大图，方便你随时对比两种效果。"
+    },
+    "subType": {
+      "type": "number",
+      "label": "表情标记值（sub_type）",
+      "description": "默认 **1** = 按「表情」发送（小图、可长按收藏），这是正常人类发表情的形式，一般不用改。\n\n改成 0 就等于旧的「普通图片」行为（大图）。\n\n之所以做成可改：不同版本的协议端/客户端对这个字段的解释可能不同。万一你更新协议端后发现表情显示异常，可以先试着在这里改 0 验证是不是它引起的。"
+    },
+    "debug": {
+      "type": "boolean",
+      "label": "调试日志",
+      "description": "默认**关**。打开后每次发表情都会记一行（原始分段 → 改写后的分段），排查「为什么这次没按表情发出去」时打开。"
+    }
+  }
+}

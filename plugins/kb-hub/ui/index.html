@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>多知识库中心 · 控制台</title>
+  <!-- CSP 由程序下发（script-src 'self'）：脚本一律外链，不用内联事件 -->
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/plugin-ui/kb-hub/style.css" />
+  <script src="/plugin-ui/kb-hub/app.js" defer></script>
+</head>
+<body class="kh-body">
+
+<header class="kh-top">
+  <div class="kh-top-in">
+    <div class="kh-brand">
+      <span class="kh-logo">📚</span>
+      <div>
+        <div class="kh-title">多知识库中心</div>
+        <div class="kh-sub" id="kh-sub">正在载入…</div>
+      </div>
+    </div>
+    <div class="kh-top-actions">
+      <span class="kh-badge" id="kh-state">—</span>
+      <button class="btn btn-small" id="kh-open-kb" type="button">打开知识库文件夹</button>
+      <button class="btn btn-small" id="kh-open-docs" type="button">打开文档文件夹</button>
+      <button class="btn btn-small" id="kh-reload" type="button">重新扫描</button>
+    </div>
+  </div>
+</header>
+
+<div class="kh-note" id="kh-note" hidden></div>
+
+<main class="kh-wrap">
+
+  <section class="kh-card">
+    <h2>它是怎么工作的</h2>
+    <ol class="kh-steps kh-hint">
+      <li>你把资料按「一本库」放进来（下方可新建、可导入整段文本，也可以直接把 .md/.txt 文件丢进文档文件夹）。</li>
+      <li>群友那句话<b>命中</b>某条内容时，宿主机自动把命中的条目塞给机器人参考 —— 这一半不靠它自己想起来。</li>
+      <li>机器人也可以<b>主动</b>查（kb_search / kb_list / kb_read 三个工具），聊天里问「群规是什么」它会自己去翻。</li>
+      <li>标成<b>常驻</b>的库每轮都会带上，适合群规这种必须一直遵守的内容。</li>
+      <li>标成<b>限定范围</b>的库只在指定会话生效（例如只在私聊），在别处连清单都不会出现。</li>
+      <li>「调用统计与排行」只做<b>观测</b>：看清楚哪些知识真在被用、哪些从没被用过（调用的多少<b>不会</b>影响命中）。</li>
+    </ol>
+    <div class="kh-hint" id="kh-status"></div>
+    <div class="kh-hint" id="kh-errors"></div>
+  </section>
+
+  <div class="kh-cols">
+    <section class="kh-card">
+      <div class="kh-card-head">
+        <h2 id="kh-list-title">知识库</h2>
+        <div class="kh-actions">
+          <button class="btn btn-small" id="kh-new" type="button">＋ 新建</button>
+          <button class="btn btn-small" id="kh-import" type="button">导入文本</button>
+        </div>
+      </div>
+      <div class="kh-bases" id="kh-bases"></div>
+    </section>
+
+    <section class="kh-card" id="kh-detail">
+      <div class="kh-empty">左边选一本知识库，这里就会出现它的编辑界面。</div>
+    </section>
+  </div>
+
+  <section class="kh-card" id="kh-panel-new" hidden>
+    <div class="kh-card-head">
+      <h2>新建知识库</h2>
+      <div class="kh-actions"><button class="btn btn-small" id="kh-new-cancel" type="button">取消</button></div>
+    </div>
+    <div class="kh-row">
+      <div class="kh-field">
+        <label class="kh-label" for="kh-new-name">库名（随便起，中文行）</label>
+        <input class="kh-input" id="kh-new-name" type="text" placeholder="例：本群规矩" />
+      </div>
+      <div class="kh-field">
+        <label class="kh-label" for="kh-new-id">英文 id（留空自动生成）</label>
+        <input class="kh-input" id="kh-new-id" type="text" placeholder="例：group-rules" />
+      </div>
+    </div>
+    <div class="kh-field">
+      <label class="kh-label" for="kh-new-desc">这本库是干什么的（一句话，机器人靠它判断该不该查）</label>
+      <input class="kh-input" id="kh-new-desc" type="text" placeholder="例：本群的规矩、处罚方式和常见纠纷处理" />
+    </div>
+    <div class="kh-field">
+      <label class="kh-label" for="kh-new-keys">关键词（逗号分隔，命中这些词就一定查这本库）</label>
+      <input class="kh-input" id="kh-new-keys" type="text" placeholder="例：群规,规矩,违规,广告" />
+    </div>
+    <label class="kh-check"><input id="kh-new-always" type="checkbox" /> 设为常驻（每轮都带上，适合群规）</label>
+    <div class="kh-btns"><button class="btn" id="kh-new-go" type="button">创建</button></div>
+    <p class="kh-hint">创建后是空库，接着在右边的编辑界面里一条条加内容即可。</p>
+  </section>
+
+  <section class="kh-card" id="kh-panel-import" hidden>
+    <div class="kh-card-head">
+      <h2>导入整段文本</h2>
+      <div class="kh-actions"><button class="btn btn-small" id="kh-import-cancel" type="button">取消</button></div>
+    </div>
+    <p class="kh-hint">
+      把已经写好的资料整段粘进来，会按规则自动切成条目：<br />
+      · 有 <span class="kh-code"># 标题</span> 就一个标题一条；没有标题就按<b>空行分段</b>；<br />
+      · 段落里写成 <span class="kh-code">问：…</span> / <span class="kh-code">答：…</span> 会收成问答对。
+    </p>
+    <div class="kh-row">
+      <div class="kh-field">
+        <label class="kh-label" for="kh-imp-name">库名</label>
+        <input class="kh-input" id="kh-imp-name" type="text" placeholder="例：常见问题" />
+      </div>
+      <div class="kh-field">
+        <label class="kh-label" for="kh-imp-id">英文 id（留空自动生成）</label>
+        <input class="kh-input" id="kh-imp-id" type="text" placeholder="例：faq" />
+      </div>
+    </div>
+    <div class="kh-field">
+      <label class="kh-label" for="kh-imp-desc">一句话说明</label>
+      <input class="kh-input" id="kh-imp-desc" type="text" placeholder="例：群里最常被问到的那些问题" />
+    </div>
+    <div class="kh-field">
+      <label class="kh-label" for="kh-imp-keys">关键词（逗号分隔）</label>
+      <input class="kh-input" id="kh-imp-keys" type="text" placeholder="例：怎么,能不能,能不能进群" />
+    </div>
+    <div class="kh-field">
+      <label class="kh-label" for="kh-imp-text">正文</label>
+      <textarea class="kh-textarea" id="kh-imp-text" placeholder="把资料粘到这里…"></textarea>
+    </div>
+    <label class="kh-check"><input id="kh-imp-always" type="checkbox" /> 设为常驻</label>
+    <div class="kh-btns"><button class="btn" id="kh-imp-go" type="button">导入</button></div>
+  </section>
+
+  <section class="kh-card">
+    <div class="kh-card-head"><h2>命中测试</h2></div>
+    <p class="kh-hint">打一句群里可能会说的话，看看会不会命中知识库、会带哪几条进对话（不会真的发消息，也不消耗 token）。</p>
+    <div class="kh-row">
+      <div class="kh-field" style="flex:1 1 360px">
+        <label class="kh-label" for="kh-test">要测试的话</label>
+        <input class="kh-input" id="kh-test" type="text" placeholder="例：群规里说广告怎么处理" />
+      </div>
+      <div class="kh-field" style="flex:0 1 260px">
+        <label class="kh-label" for="kh-test-chat">模拟会话（可选，用来验证「生效范围」）</label>
+        <input class="kh-input" id="kh-test-chat" type="text" placeholder="例：group:1039172534 或 private:10001" />
+      </div>
+      <div class="kh-actions">
+        <button class="btn" id="kh-test-go" type="button">测试</button>
+      </div>
+    </div>
+    <div id="kh-testout"></div>
+  </section>
+
+  <section class="kh-card" id="kh-stats-card">
+    <div class="kh-card-head">
+      <h2>调用统计与排行</h2>
+      <div class="kh-actions">
+        <select class="kh-select" id="kh-stats-sort" style="width:auto">
+          <option value="total">按总调用</option>
+          <option value="inject">按自动带入</option>
+          <option value="search">按主动检索</option>
+        </select>
+        <label class="kh-check"><input type="checkbox" id="kh-stats-zero" /> 含 0 次的</label>
+        <button class="btn btn-small" id="kh-stats-refresh" type="button">刷新</button>
+        <button class="kh-del" id="kh-stats-reset" type="button">清零统计</button>
+      </div>
+    </div>
+    <p class="kh-hint">
+      这里<b>只统计，不影响检索</b>：次数与排行不参与打分，不会让任何一条知识因此更容易或更难被命中。
+      计数来自两种情况：<b>自动带入</b>（回答前自动塞进上下文）与<b>工具检索</b>（机器人主动查）；
+      读整本（kb_read）按<b>库</b>计一次，不摊到每条。
+    </p>
+    <div class="kh-hint" id="kh-stats-summary"></div>
+    <div class="kh-hint" id="kh-stats-bases"></div>
+    <div id="kh-stats-rows"></div>
+  </section>
+
+  <section class="kh-card">
+    <h2>放文件的地方</h2>
+    <div class="kh-hint" id="kh-dirs">正在读取路径…</div>
+    <div class="kh-hint">
+      <b>结构化库</b>是页面里编辑的 <span class="kh-code">*.json</span>；
+      <b>文档库</b>是丢进 <span class="kh-code">docs</span> 子文件夹的 <span class="kh-code">.md/.txt</span>（一个文件 = 一本库）。
+      两种都会被自动发现：改完文件<b>不用重启程序</b>，页面点一下「重新扫描」即可。
+    </div>
+    <div class="kh-hint kh-muted">
+      提醒：知识库正文存在宿主的数据目录里（<span class="kh-code">data/knowledge/</span>），不在插件目录里 —— 升级或重装插件都不会丢。
+    </div>
+  </section>
+
+</main>
+
+<div class="kh-toast" id="kh-toast" hidden></div>
+</body>
+</html>

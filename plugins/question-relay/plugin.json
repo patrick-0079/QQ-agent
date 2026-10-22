@@ -1,0 +1,55 @@
+{
+  "id": "question-relay",
+  "name": "问号接龙",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "群里连续出现两条及以上问号消息（全角？、半角? 都算）时，机器人自动跟着接一个问号；同一轮接龙只接一次，链条断了（有人发了别的）才重新开始。纯确定性触发：判定、次数、时机全由代码控制，模型只负责把那个问号发出去。",
+  "author": "本机定制",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": true,
+  "settings": {
+    "enabled": true,
+    "relayChar": "？",
+    "questionChars": "?？",
+    "minChain": 2,
+    "lookback": 30
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用问号接龙",
+      "description": "关掉后不再自动接问号（插件保留，随时可以再打开）。"
+    },
+    "relayChar": {
+      "type": "string",
+      "label": "接龙时发的字符",
+      "description": "机器人跟着接的内容，默认全角「？」。想让它接别的字符（比如「?」或「❓」）就填这里。"
+    },
+    "questionChars": {
+      "type": "string",
+      "label": "算作「问号」的字符",
+      "description": "由这些字符组成的消息算一条问号。默认「?？」（英文半角 + 中文全角），一般不用改。"
+    },
+    "minChain": {
+      "type": "number",
+      "label": "连续几条才接",
+      "description": "群里连续出现这么多条问号消息后，机器人才接。默认 2 —— 也就是「接龙了两次及以上」才出手。",
+      "min": 1,
+      "max": 10,
+      "step": 1
+    },
+    "lookback": {
+      "type": "number",
+      "label": "回看多少条消息",
+      "description": "每次判定时向前回看的历史条数，用来数「连续的问号」。默认 30 条，一般不需要改。",
+      "min": 5,
+      "max": 200,
+      "step": 5
+    }
+  },
+  "capabilities": [
+    "status.question-relay"
+  ]
+}

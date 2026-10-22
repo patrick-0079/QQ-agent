@@ -1,0 +1,38 @@
+{
+  "id": "usage-report",
+  "name": "用量与花费",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "主人私聊问「今天花了多少 token / 多少钱」「谁最费钱」时，汇总今天到现在的 token 用量与估算花费，并列出消耗最多的前三个群聊/私聊。数据来自既有会话记录与单价配置，不改任何对话行为；只有配置里的主人 QQ 能查。",
+  "author": "QQ Agent 用户",
+  "enabledByDefault": true,
+  "settings": {
+    "topN": 3,
+    "includeCacheRate": true
+  },
+  "configSchema": {
+    "topN": {
+      "type": "number",
+      "label": "显示前几名",
+      "description": "列出消耗最多的前几个群聊/私聊。默认 3。",
+      "min": 1,
+      "max": 10
+    },
+    "includeCacheRate": {
+      "type": "boolean",
+      "label": "附带缓存命中率",
+      "description": "开启后在报告里多给一行「缓存命中率」，方便判断省钱效果。默认开启。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "usage-report-howto",
+        "title": "用量与花费（只有主人能查）",
+        "priority": 42,
+        "content": "【用量与花费】\n- 主人问「今天花了多少 token / 多少钱」「今天谁最费钱 / 哪个群聊用得最多」这类问题时，调用 usage_report__today 工具查询，不要凭印象猜，也不要说「我看不到账本」。\n- 工具会返回：今日总 token、估算花费、缓存命中率，以及消耗最多的前几个群聊/私聊。\n- 这是财务数据，只有配置里的主人 QQ 能查。工具对非主人会直接拒绝；被拒时如实转告，不要替对方绕过、不要泄露任何数字。\n- 结果用你平时的口吻简短说，别照抄整段；数字要准确。"
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "tool-boost",
+  "name": "工具使用强化",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "提高机器人主动调用技能的倾向：把「先查后答」写成硬规则，给出工具清单与偷懒借口对照表，并明确说明「调工具不算出戏、不影响角色语气」。只加一段提示词，不改核心、不动其它插件。强度可在设置里调（strong / normal / off）。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "strength": "strong"
+  },
+  "configSchema": {
+    "strength": {
+      "type": "enum",
+      "values": ["strong", "normal", "off"],
+      "label": "强化强度",
+      "description": "strong = 硬性要求先查后答（默认）；normal = 只做温和提醒；off = 不注入这段提示词（等于关掉本插件）。"
+    }
+  },
+  "prompt": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "command-digest",
+  "name": "群总结指令",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "让群里发「/群总结」就能直接出总结图（确定性触发，不靠模型猜）。把斜杠命令改写成明确指令交给 chat-digest 技能，支持「/群总结 300」指定条数。",
+  "author": "QQ Agent 用户定制",
+  "enabledByDefault": true,
+  "permissions": [],
+  "settings": {
+    "commands": "/群总结, /总结, /群聊总结",
+    "forceCount": 0
+  },
+  "configSchema": {
+    "commands": {
+      "type": "string",
+      "label": "触发命令",
+      "description": "多个命令用英文逗号分隔，默认「/群总结, /总结, /群聊总结」。命令后面可以跟条数，例如「/群总结 300」。"
+    },
+    "forceCount": {
+      "type": "number",
+      "label": "强制条数",
+      "description": "填 0 = 听群友的（没写就用技能设置里的默认条数）。填 100~2000 则无论群友写多少都用这个数。",
+      "min": 0,
+      "max": 2000
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "id": "at-mention",
+  "name": "@群友（按名字）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "让机器人用名字 @ 群友，而不是被迫先查 QQ 号。她在正文里写「@泡影之梦 你说得对」时，本插件把这段名字认领出来，转成真正的 QQ @ 提醒（对方会收到红点），而不是一串没人看得到的普通字符。支持一次 @ 多个人。认不出名字就按原样发送，绝不猜——猜错会 @ 到无关的人。需要宿主支持 message.outgoing-at-resolve 能力（1.0.0 起 sender.js 已内置接入点）。",
+  "author": "小肥鱼",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "capabilities": [
+    "message.outgoing-at-resolve"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "maxMentions": 5,
+    "allowPartialMatch": true,
+    "debug": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用按名字 @",
+      "description": "关掉后正文里的 @名字 原样发送（与没装一样），对方不会收到提醒。"
+    },
+    "maxMentions": {
+      "type": "number",
+      "label": "单条消息最多 @ 几人",
+      "description": "1~10，默认 5。防止模型刷屏式 @ 一长串人。"
+    },
+    "allowPartialMatch": {
+      "type": "boolean",
+      "label": "允许前缀匹配",
+      "description": "开启时「@泡影」能匹配到群名片为「泡影之梦」的人。关掉只认完全同名的（更保守，但群名片带后缀时会 @ 不上）。"
+    },
+    "debug": {
+      "type": "boolean",
+      "label": "记录解析日志",
+      "description": "开启后每次 @ 解析都会在控制台写一行，便于确认它是否在生效。"
+    }
+  }
+}

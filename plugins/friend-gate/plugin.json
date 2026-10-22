@@ -1,0 +1,141 @@
+{
+  "id": "friend-gate",
+  "name": "好友申请管家",
+  "version": "1.3.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "author": "QQ Agent + DSH",
+  "description": "好友申请的完整闭环：有人申请 → **私聊通知你**（QQ、验证消息、是否已在白名单）；你说「同意 / 拒绝」→ 插件自己调接口真点；通过后**自动加进聊天白名单**；还能说「给他用 XX 人设」。**自带机主名单**，填一次即可，不依赖别的插件；OneBot 地址可留空（会自动找）。【本次更新 v1.3.0】① 修令牌拿错：有多份账号配置时逐个探活，挑能用的那份（原来只取第一份，可能是失效的旧令牌）；② 修\"装上没反应\"：数据目录改为优先用程序给的、且必须可写；③ 判定更稳：「不通过/别同意」不再误判；多条申请按你点名的 QQ 处理，不点名就问你；④ 汇报对象可指定（默认汇报机主，也能只汇报给某几个 QQ）；⑤ WS 监听器默认关（不再刷 401）；⑥ 修掉\"机器人对着自己发的文件说话\"。",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "permissions": [],
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "ownerOnly": true,
+    "autoApprove": false,
+    "autoWhitelist": true,
+    "maxPerHour": 10,
+    "approveWords": "同意,通过,批准,加他,加上,准了,行,可以",
+    "rejectWords": "拒绝,不同意,拒了,别加,不加,pass",
+    "pythonPath": "",
+    "pythonLibPath": "",
+    "owners": "",
+    "extraOwnerQq": "",
+    "notifyQq": "",
+    "consoleApi": "http://127.0.0.1:3210",
+    "onebotHttp": "",
+    "onebotToken": "",
+    "enableWsWatch": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "group": "总开关",
+      "label": "启用好友申请管家",
+      "description": "关掉后：有人加好友不会再通知你，也不会替你点。"
+    },
+    "ownerOnly": {
+      "type": "boolean",
+      "group": "权限",
+      "label": "只有机主能操作",
+      "description": "默认开：只有 ownerQq / owners / admins 名单里的人能拍板，别人说了也白说。"
+    },
+    "autoApprove": {
+      "type": "boolean",
+      "group": "处理",
+      "label": "全自动通过（不问机主）",
+      "description": "默认**关**：机主拍板了才点。打开则一有人申请就自动通过（仍受黑名单与每小时上限限制）。"
+    },
+    "autoWhitelist": {
+      "type": "boolean",
+      "group": "处理",
+      "label": "通过后自动加聊天白名单",
+      "description": "默认开。白名单非空时，不在名单里的会话机器人根本不理，所以通过之后必须加进去才有用。"
+    },
+    "maxPerHour": {
+      "type": "number",
+      "group": "处理",
+      "label": "每小时最多自动通过",
+      "description": "只在「全自动通过」打开时生效，防滥用。默认 10。"
+    },
+    "approveWords": {
+      "type": "string",
+      "group": "话术",
+      "label": "同意类关键词",
+      "description": "机主在私聊里说这些词 = 同意（逗号分隔）。"
+    },
+    "rejectWords": {
+      "type": "string",
+      "group": "话术",
+      "label": "拒绝类关键词",
+      "description": "机主在私聊里说这些词 = 拒绝（逗号分隔）。"
+    },
+    "pythonPath": {
+      "type": "string",
+      "group": "高级",
+      "label": "Python 路径（可留空）",
+      "description": "只有备用的 WebSocket 监听器用到。**留空即可**：主通道是日志监听，不需要 Python。"
+    },
+    "pythonLibPath": {
+      "type": "string",
+      "group": "高级",
+      "label": "Python 依赖路径（可留空）",
+      "description": "同上，留空即可。"
+    },
+    "owners": {
+      "type": "roster",
+      "source": "people",
+      "pick": "multi",
+      "namesKey": "ownersNames",
+      "label": "机主 QQ 号（谁能拍板同意/拒绝）",
+      "description": "点「选择好友…」勾选。**只填这里就够用**，不需要管理员名单插件。留空时会回落到核心配置的 ownerQq（以及装了管理员名单插件时的 owners）。"
+    },
+    "ownersNames": {
+      "type": "names",
+      "label": "（名字备注，自动，只用于显示）"
+    },
+    "notifyQq": {
+      "type": "roster",
+      "source": "people",
+      "pick": "multi",
+      "namesKey": "notifyQqNames",
+      "label": "好友申请汇报给谁",
+      "description": "留空 = 汇报给机主（默认，行为不变）。填了就**只汇报给这几个号**（比如让某个群友也看到申请动态）。注意：填了以后**拍板还是机主说了算**，被汇报的人只收通知、不能替你点同意。"
+    },
+    "notifyQqNames": {
+      "type": "names",
+      "label": "（名字备注，自动，只用于显示）"
+    },
+    "consoleApi": {
+      "type": "string",
+      "group": "连接（通用）",
+      "label": "控制台接口地址",
+      "description": "一般不用改，默认 http://127.0.0.1:3210。插件用它把新增的设置项自动补进配置（免得控制台里看不到）。"
+    },
+    "onebotHttp": {
+      "type": "string",
+      "group": "连接（通用）",
+      "label": "OneBot 接口地址",
+      "description": "你的机器人框架的 HTTP 接口地址，例如 http://127.0.0.1:3000 。**留空会自动找**：先到处找 SnowLuma 配置，找不到就按标准 http://127.0.0.1:3000 试。NapCat / Lagrange / LLOneBot 都填这个。"
+    },
+    "onebotToken": {
+      "type": "string",
+      "group": "连接（通用）",
+      "label": "OneBot access_token",
+      "description": "接口没设密码就留空。填了就按 Bearer 带上。"
+    },
+    "enableWsWatch": {
+      "type": "boolean",
+      "group": "高级",
+      "label": "启用 WebSocket 监听器（默认关）",
+      "description": "备用的第二条发现通道（需要 Python + websocket-client）。**SnowLuma 不会推送好友申请事件，所以开着它只会每几秒报一次 401，没任何用**——默认关闭。只有你确认自己的框架会推 request 事件时才打开。"
+    },
+    "extraOwnerQq": {
+      "type": "string",
+      "label": "额外机主 QQ（逗号分隔）",
+      "description": "除 owners 外，额外允许拍板的 QQ。"
+    }
+  }
+}

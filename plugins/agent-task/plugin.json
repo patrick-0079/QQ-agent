@@ -1,0 +1,198 @@
+{
+  "id": "agent-task",
+  "name": "AI 任务",
+  "version": "2.1.2",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "在 QQ 里用大白话给本机的 AI agent（CLI 型）布置任务，它跑完把结果回传原会话。默认后端是本机的 DSH（DeepSeek Harness），也可以在后端列表里加别的 agent（Claude Code、Codex CLI 等）。用法：发「帮我看看某个目录的 logs 里今天有没有报错」，机器人把整句话交给后端执行，完成后把最终回答发回来。⚠️ 这类 CLI agent 通常带文件系统与命令执行工具 —— 能真的在你电脑上改文件、跑命令。因此本插件默认【关闭】，开启后仍需先解锁才受理（类似电脑遥控 L3 的两道锁），只认主人与指定群。",
+  "author": "QQ Agent",
+  "entry": "index.js",
+  "enabledByDefault": false,
+  "permissions": [],
+  "capabilities": [],
+  "requires": [],
+  "commandOnly": true,
+  "commands": [
+    "任务"
+  ],
+  "tools": [
+    {
+      "id": "task_route",
+      "name": "AI 任务路由",
+      "description": "处理 \\任务 指令（帮助 / 解锁 / 上锁 / 状态 / 后端列表 / 布置任务）。由指令直达链路调用，模型不可见。",
+      "category": "utility",
+      "icon": "🎯"
+    }
+  ],
+  "commandRoute": [
+    {
+      "tool": "task_route",
+      "commands": [
+        "任务"
+      ],
+      "args": {
+        "__agentTask": "direct-route"
+      }
+    }
+  ],
+  "settings": {
+    "ownerIds": "",
+    "extraChatIds": "",
+    "armed": false,
+    "lockMode": "window",
+    "armedTTL": 300,
+    "maxRuns": 0,
+    "armedAt": 0,
+    "armedRuns": 0,
+    "maxPerHour": 10,
+    "timeoutSec": 600,
+    "workDir": "",
+    "backends": "",
+    "defaultBackend": "dsh",
+    "nodePath": "",
+    "maxReplyChars": 1500,
+    "maxReplyParts": 6,
+    "plainMath": true,
+    "announceOnStart": true
+  },
+  "configSchema": {
+    "ownerIds": {
+      "type": "string",
+      "label": "主人QQ号（逗号分隔，可选）",
+      "description": "留空则使用「主人识别」插件的判定（与电脑遥控同源）。只有这里列出的号能布置任务。",
+      "group": "权限"
+    },
+    "extraChatIds": {
+      "type": "string",
+      "label": "额外允许的群号（逗号分隔）",
+      "description": "主人的私聊永远允许。这里填的群也允许布置任务 —— 但群里【只有主人本人】发的话才受理，其他人发的一律静默忽略。留空 = 只认私聊。",
+      "group": "权限"
+    },
+    "backends": {
+      "type": "string",
+      "label": "agent 后端列表",
+      "description": "每行一个，格式「名字=命令模板」。模板里的 {task} 会被替换成你布置的任务（整句作为一个参数，不做 shell 解析，所以任务里有引号分号也安全）；不写 {task} 就自动追加到末尾。命令第一个词若是 node，会自动换成可用的 node 绝对路径。\n留空 = 自动按常见位置找 DSH（找到就用；找不到会在布置任务时提示你来填）。\n写法示例：\n  dsh=node 你的DSH目录/node_modules/@deepseek-ai/dsh/lib/bin.js --profile headless {task}\n  cc=claude -p {task}\n用的时候：默认走「默认后端」；想指定就发「\\任务 -后端名 你的任务」。",
+      "group": "后端",
+      "multiline": true
+    },
+    "defaultBackend": {
+      "type": "string",
+      "label": "默认后端",
+      "description": "不写「-后端名」时用哪个。填后端列表里的名字，默认 dsh。",
+      "group": "后端"
+    },
+    "nodePath": {
+      "type": "string",
+      "label": "node 可执行文件（留空 = 自动探测）",
+      "description": "留空即可 —— 会自动按顺序找：本机 PATH、常见 node 安装目录。只有自动探测失败时才需要手填绝对路径。",
+      "group": "后端"
+    },
+    "workDir": {
+      "type": "string",
+      "label": "工作目录（留空 = 继承机器人启动目录）",
+      "description": "agent 的工作目录 —— 决定它默认在哪个目录里干活。建议填一个项目目录的绝对路径。",
+      "group": "执行"
+    },
+    "armed": {
+      "type": "boolean",
+      "label": "上锁开关（armed）",
+      "description": "第二道锁：插件启用之外还必须打开这个开关（或在群里发「\\任务 解锁」）才会受理任务。默认关闭。到点会自动写回 false。",
+      "group": "解锁"
+    },
+    "lockMode": {
+      "type": "enum",
+      "values": [
+        "off",
+        "window",
+        "custom"
+      ],
+      "label": "上锁模式",
+      "description": "off = 不自动锁（解锁后一直有效，直到手动「\\任务 上锁」）；window = 固定窗口，解锁后过「解锁窗口」秒自动上锁；custom = 自定义，「窗口秒数」与「最多执行几次」任一先到即上锁（次数填 1 = 用完即锁）。",
+      "group": "解锁"
+    },
+    "armedTTL": {
+      "type": "number",
+      "label": "解锁窗口（秒，0 = 不限时）",
+      "description": "window / custom 模式下生效：解锁后多久自动上锁。默认 300（5 分钟）。填 0 表示不限时。",
+      "group": "解锁"
+    },
+    "maxRuns": {
+      "type": "number",
+      "label": "最多执行几次（custom 模式）",
+      "description": "自定义模式下本次解锁最多跑几个任务。填 1 = 用完即锁；填 0 = 不限次数（只受窗口时间约束）。默认 0。",
+      "group": "解锁"
+    },
+    "maxPerHour": {
+      "type": "number",
+      "label": "每小时最多几个任务",
+      "description": "防止连发把机器和额度跑爆（每个任务都是一次完整的 agent 会话，会消耗 token）。默认 10。",
+      "group": "执行"
+    },
+    "timeoutSec": {
+      "type": "number",
+      "label": "单个任务超时（秒）",
+      "description": "跑多久算超时，超过就杀掉进程并回报「超时」。默认 600（10 分钟）。",
+      "group": "执行"
+    },
+    "maxReplyChars": {
+      "type": "number",
+      "label": "每条结果最多多少字",
+      "description": "agent 的回答可能很长。超过这个长度会**切成下一条继续发**（不再截断丢内容）。默认 1500 字。",
+      "group": "输出"
+    },
+    "maxReplyParts": {
+      "type": "number",
+      "label": "结果最多分几条发",
+      "description": "长结果按上一条的长度切成多条依次发出。超过这个条数就停下，末尾补一句「还有多少字没发」，防止一个话痨任务把群刷屏。默认 6 条。",
+      "group": "输出"
+    },
+    "plainMath": {
+      "type": "boolean",
+      "label": "把公式转成能看懂的文字",
+      "description": "QQ 不会渲染 LaTeX，$$\frac{a}{b}$$ 这类源码原样发出去就是一团乱码（群友实测反馈「乱码了？」「latex没渲染」）。开启后会自动翻成 (a)/(b)、Δ、→、² 这类纯文本符号。只处理真正的公式段落，不会动 $5 这种金额。默认开；想要原始公式就关掉。",
+      "group": "输出"
+    },
+    "announceOnStart": {
+      "type": "boolean",
+      "label": "开始时先回一句「已受理」",
+      "description": "开=受理后立刻回一句（告诉你任务在跑、用的是哪个后端），完成后另发结果；关=只在完成时回一句。默认开。",
+      "group": "输出"
+    },
+    "armedAt": {
+      "type": "internal",
+      "label": "解锁时刻",
+      "description": "解锁时由代码写入的时间戳（用于按「自动上锁窗口」判断是否已过期），不在这里改 —— 改「自动上锁窗口」即可。",
+      "group": "安全"
+    },
+    "armedRuns": {
+      "type": "internal",
+      "label": "本次解锁已跑次数",
+      "description": "由代码在每次任务跑完后自增的计数（custom 模式下到「最多执行几次」就自动上锁），不在这里改。",
+      "group": "安全"
+    },
+    "progress": {
+      "type": "boolean",
+      "label": "回传进度",
+      "description": "任务跑得比较久时，中途发几条「它在干嘛」（如「执行命令：…」「读文件 …」）。刻意压得很省：快任务一条不发，一个任务最多发「最多几条」条，两条之间至少隔「进度间隔」秒。关掉就只在结束时回结果。",
+      "group": "进度"
+    },
+    "progressMax": {
+      "type": "number",
+      "label": "一个任务最多发几条",
+      "description": "默认 3。设 0 = 完全不回传进度。",
+      "group": "进度"
+    },
+    "progressGapSec": {
+      "type": "number",
+      "label": "两条进度至少隔几秒",
+      "description": "默认 25。间隔内出现的新动作会被跳过，不刷屏。",
+      "group": "进度"
+    },
+    "progressAfterSec": {
+      "type": "number",
+      "label": "跑够几秒才开始报",
+      "description": "默认 20。20 秒内就跑完的任务一条进度都不发 —— 快任务不打扰。",
+      "group": "进度"
+    }
+  }
+}

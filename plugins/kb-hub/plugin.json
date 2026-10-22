@@ -1,0 +1,93 @@
+{
+  "id": "kb-hub",
+  "name": "多知识库中心",
+  "version": "1.3.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "description": "一个能装很多本知识库的容器。你把资料按“一本库”为单位放进来（群规、设定、FAQ、产品资料都行），机器人回答前会自动去相关的库里翻一遍再把结果带上，也可以自己主动查。每本库可以单独限定生效范围（全部会话 / 只在私聊 / 只在指定群 / 排除指定群）。附带一个可视化控制台页面：新建/编辑/删除知识库、导入整段文本、设定生效范围、以及“命中测试”（打一句话并可选模拟会话，看会不会命中、被作用域挡掉了哪几本）。",
+  "author": "QQ Agent + DSH",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "permissions": [],
+  "settings": {
+    "enabled": true,
+    "autoInject": true,
+    "autoInjectMinScore": 6,
+    "maxInjectHits": 3,
+    "maxInjectChars": 900,
+    "alwaysMaxChars": 1200,
+    "catalogInPrompt": true,
+    "toolSearch": true,
+    "toolLimit": 5,
+    "debugLog": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用多知识库中心",
+      "description": "总开关。关掉后：不再自动带入知识库内容，也不给机器人检索工具。"
+    },
+    "autoInject": {
+      "type": "boolean",
+      "label": "相关时自动带上知识库内容",
+      "description": "开启时：群友那句话命中知识库，就把命中的条目自动塞给机器人参考（不靠它自己想起来）。这是“必然生效”的那一半。"
+    },
+    "autoInjectMinScore": {
+      "type": "number",
+      "label": "自动带入的最低相关度",
+      "description": "越高越严格（越不容易误带）。默认 6。嫌它动不动就带资料，就调到 8~10；嫌该带的没带，调到 4。"
+    },
+    "maxInjectHits": {
+      "type": "number",
+      "label": "自动带入几条",
+      "description": "一次最多自动带几条命中的资料，默认 3。带太多会挤占对话上下文。"
+    },
+    "maxInjectChars": {
+      "type": "number",
+      "label": "自动带入的字数上限",
+      "description": "自动带入的正文总字数上限（超出会截断），默认 900。"
+    },
+    "alwaysMaxChars": {
+      "type": "number",
+      "label": "常驻知识字数上限",
+      "description": "标记为“常驻”的知识库每轮都会带上，这里是它的字数上限，默认 1200。适合群规这种必须一直遵守的库。"
+    },
+    "catalogInPrompt": {
+      "type": "boolean",
+      "label": "把知识库清单写进提示词",
+      "description": "开启时：机器人知道你有哪几本库（名称+说明），才会想起来去查。关掉后它只能靠自动带入。"
+    },
+    "toolSearch": {
+      "type": "boolean",
+      "label": "允许机器人主动查",
+      "description": "开启时：给机器人 kb_search / kb_list / kb_read 三个工具，它可以自己决定去翻库。"
+    },
+    "toolLimit": {
+      "type": "number",
+      "label": "主动查最多返回几条",
+      "description": "机器人主动检索时最多返回几条，默认 5。"
+    },
+    "debugLog": {
+      "type": "boolean",
+      "label": "打印命中日志",
+      "description": "开启后每轮会把“查了什么、命中什么、有没有注入”写进控制台日志，排查“到底有没有生效”时用。"
+    }
+  },
+  "tools": [
+    { "id": "kb_search", "name": "查知识库", "description": "按关键词检索所有知识库" },
+    { "id": "kb_list", "name": "列出知识库", "description": "列出所有知识库及条目数" },
+    { "id": "kb_read", "name": "读取整本知识库", "description": "读取某一本知识库的全文" }
+  ],
+  "prompt": {
+    "sections": [
+      {
+        "id": "kb-hub-usage",
+        "title": "多知识库中心",
+        "priority": 46,
+        "content": "你手上有几本「知识库」（群规、设定、常见问题、资料等）。当问题可能踩到库里的内容（规矩、专有名词、固定说法、常见问题、人物或项目设定）时，先用 kb-hub__kb_search 查一次再回答；不确定有哪些库就先 kb-hub__kb_list，要整本通读用 kb-hub__kb_read。查到就按库里的说法回答，不要自己编；查不到就照常回答。回答时不要把「知识库」「检索」这些词说出来，也不要说「我查一下」——直接答。若消息里已经带了【知识库参考】或【常驻知识】，那些内容优先于你自己的印象。"
+      }
+    ]
+  }
+}

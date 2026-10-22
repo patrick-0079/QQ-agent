@@ -1,0 +1,66 @@
+{
+  "id": "deepseek-search-fix",
+  "name": "DeepSeek 搜索修补",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "enabledByDefault": true,
+  "category": "utility",
+  "description": "修补内置 DeepSeek 联网搜索：把「模型自己编的一段话」换成真正的原生搜索结果（带真实链接）。模型无感知，不需要任何设置。",
+  "author": "",
+  "permissions": ["web_fetch"],
+  "requires": [],
+  "capabilities": [],
+  "settings": {
+    "apiKey": "",
+    "baseUrl": "",
+    "model": "deepseek-v4-flash",
+    "maxUses": 5,
+    "maxResults": 10,
+    "timeoutMs": 120000,
+    "repairErrors": true,
+    "autoScope": true
+  },
+  "configSchema": {
+    "apiKey": {
+      "type": "string",
+      "label": "DeepSeek API Key",
+      "description": "留空则自动复用应用里已配置的 DeepSeek Key（推荐留空）",
+      "secret": true
+    },
+    "baseUrl": {
+      "type": "string",
+      "label": "接口地址",
+      "description": "留空 = 沿用应用的 DeepSeek 地址。会自动换算成 /anthropic/v1/messages"
+    },
+    "model": {
+      "type": "string",
+      "label": "模型",
+      "description": "Anthropic 兼容端点上可用的模型名，默认 deepseek-v4-flash"
+    },
+    "maxUses": {
+      "type": "number",
+      "label": "单次最多检索次数",
+      "description": "1~10，默认 5。越大查得越全，也越慢越贵"
+    },
+    "maxResults": {
+      "type": "number",
+      "label": "最多返回几条结果",
+      "description": "按 URL 去重后截断，默认 10"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "超时（毫秒）",
+      "description": "原生搜索较慢，建议不低于 60000"
+    },
+    "repairErrors": {
+      "type": "boolean",
+      "label": "连报错也一并修补",
+      "description": "开启后，内置搜索直接报错（超时/无法解析）时也用原生搜索补一次。默认开启"
+    },
+    "autoScope": {
+      "type": "boolean",
+      "label": "只在搜索提供方是 deepseek 时生效",
+      "description": "默认开启。用 bing / 博查 / 智谱等其它提供方时，本插件完全不介入"
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "id": "mcp-bridge",
+  "name": "MCP 桥",
+  "version": "1.0.1",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "给 QQ agent 补一个 MCP 客户端：把任意 MCP 服务接进来，模型能直接调用它的工具，其它插件也能用 mcp.call 借用。【主要功能】① 给模型 3 个工具：mcp_list 列出已接入服务、工具及参数名，mcp_call 按「服务+工具+参数」调用，mcp_reload 改完配置或服务异常后重连。② 给插件 2 个能力：mcp.call 传 {server,tool,arguments} 返回 {ok,text,raw}，mcp.list 同步返回各服务状态与工具清单。③ 两种传输：stdio（npx、uvx、本地可执行文件）与 HTTP Streamable（JSON 或 SSE）；配置格式与 Claude Desktop 完全一致，可直接粘 mcpServers 片段，也支持 servers 数组、裸数组、扁平对象。④ 装好即用：默认内置 GameHOT 资讯（匿名只读，7 个工具：精选、搜索、热点榜、事件时间线、日报/周报/月报），不需要 API Key，也不下载 npm 包。⑤ 可靠性：调用失败自动重连一次；日志超 512KB 自动清空；MCP 返回的图片落盘（单张 ≤8MB，三天自动清理）。【说明】只能连接配置里显式列出的服务，模型无法动态添加（避免变成任意命令执行）；不支持 OAuth 授权跳转（远程服务请用长期令牌放 headers）、不支持 sampling/roots 反向请求、不消费服务端推送（工具变化需 mcp_reload）。协议参考 Model Context Protocol 规范（https://modelcontextprotocol.io），客户端自行实现、零第三方依赖；默认服务由 GameHOT（https://gamehot.xiaoxun.xyz）提供。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "capabilities": [
+    "mcp.call",
+    "mcp.list"
+  ],
+  "requires": [],
+  "settings": {
+    "serversJson": "{\n  \"mcpServers\": {\n    \"gamehot\": {\n      \"type\": \"http\",\n      \"url\": \"https://gamehot.xiaoxun.xyz/api/mcp\"\n    }\n  }\n}",
+    "serversFile": "",
+    "autoStart": true,
+    "callTimeoutMs": 60000,
+    "maxOutputChars": 4000
+  },
+  "configSchema": {
+    "serversJson": {
+      "type": "string",
+      "multiline": true,
+      "label": "MCP 服务配置（JSON）",
+      "description": "默认已填 GameHOT 资讯（匿名只读，装好就能用）。要加别的服务，按 Claude Desktop 的格式追加，例如：{\"mcpServers\":{\"filesystem\":{\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-filesystem\",\"D:/data\"]},\"github\":{\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-github\"],\"env\":{\"GITHUB_PERSONAL_ACCESS_TOKEN\":\"ghp_xxx\"}}}}。也支持 {\"servers\":[{...}]}、裸数组、扁平对象；远程服务写 {\"url\":\"https://...\",\"headers\":{}}。"
+    },
+    "serversFile": {
+      "type": "string",
+      "label": "配置文件路径（可选）",
+      "description": "如果不想把配置贴在设置里，可以指向一个 JSON 文件，例如 data/mcp-servers.json。文件存在时优先读它。"
+    },
+    "autoStart": {
+      "type": "boolean",
+      "label": "启用时自动连接",
+      "description": "默认开启。关掉后，第一次调用工具或 mcp_reload 时才连接（适合启动慢的服务）。"
+    },
+    "callTimeoutMs": {
+      "type": "number",
+      "min": 3000,
+      "max": 600000,
+      "label": "单次调用超时（毫秒）",
+      "description": "默认 60000。抓网页、跑查询这类工具有时比较慢，超时会明确报错，不会静默卡住。"
+    },
+    "maxOutputChars": {
+      "type": "number",
+      "min": 800,
+      "max": 20000,
+      "label": "输出截断长度（字符）",
+      "description": "默认 4000。MCP 工具可能返回超大内容，截断避免把上下文撑爆；超出时会注明总长度。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "mcp-bridge-note",
+        "title": "MCP 工具",
+        "priority": 60,
+        "content": "如果要用的能力不在现有工具里，先看有没有 MCP 服务：调 mcp_list 列出已接入的服务与工具，再用 mcp_call 调用（server + tool + arguments）。**不要凭想象编造 MCP 工具名或参数**——参数必须按 mcp_list 里显示的 inputSchema 填；拿不准就先列出来看。MCP 返回的内容不是你看过的事实，转述时可以说明来源。"
+      }
+    ]
+  }
+}

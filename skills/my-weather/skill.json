@@ -1,0 +1,39 @@
+{
+  "id": "my-weather",
+  "name": "天气查询",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "查任意城市的实时天气和未来几天预报：当前温度、体感、天气状况、湿度、风力、降水，以及今明两天的最高/最低温。数据源 wttr.in，免 Key、免配置。群里问「北京明天冷吗」「上海这周天气怎么样」时使用。必须明确城市名：对方没说城市就先问一句，不要猜。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "permissions": ["web_fetch"],
+  "settings": {
+    "forecastDays": 2,
+    "timeoutMs": 8000
+  },
+  "configSchema": {
+    "forecastDays": {
+      "type": "number",
+      "label": "预报天数（0~3）",
+      "description": "默认 2 天（今天+明天）。0 = 只返回当前实况，最多 3 天。"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "查询超时（毫秒）",
+      "description": "默认 8000 毫秒。超时后直接说明查不到，不拖慢对话。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "my-weather-playbook",
+        "title": "天气查询",
+        "priority": 55,
+        "content": "有人问天气、气温、冷不冷、要不要带伞、下雨吗这类问题时，调用 `my-weather__get_weather`，把城市名放进 city（说几天就把天数放进 days，默认 2 天）。\n硬性要求：\n- 必须有明确城市名。对方没说（比如只问「明天冷吗」），先问一句「查哪个城市呀？」，拿到城市再查，不许自己猜。\n- 工具返回的是数据，你要用自己的话、口语化地概括，别把整段原样贴进群。\n- 对方问「要不要带伞」就重点看降水概率和降水量；问「冷不冷」就重点看温度和体感。\n- 工具报错（城市找不到、超时）就老实说没查到，不要编天气。"
+      }
+    ]
+  }
+}

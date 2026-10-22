@@ -1,0 +1,329 @@
+{
+  "id": "pcstatus",
+  "name": "电脑状态",
+  "version": "2.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "群里问「电脑卡不卡」「QQ Agent 跑了多久」，就查本机真实数据回一张状态卡片。可查 CPU（含单核最高）、内存、硬盘剩余与总容量、显卡型号与占用、开机时长，以及任意软件的进程数/内存/运行时长——含 QQ Agent 自身（SnowLuma 看不到它）。纯 Node 实现，不用 PowerShell、不打包任何脚本或可执行文件。",
+  "author": "QQ Agent 用户自制",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "permissions": [],
+  "settings": {
+    "sendAs": "card",
+    "replyStyle": "card",
+    "cardTheme": "light",
+    "backgroundImage": "",
+    "topListInCompact": 2,
+    "topN": 8,
+    "timeoutMs": 20000,
+    "detailLevel": "brief",
+    "opacity": 55,
+    "displayMode": "ring",
+    "showOs": true,
+    "showCpuInfo": true,
+    "showCpu": true,
+    "showMem": true,
+    "showDisk": true,
+    "showProcs": true,
+    "showQQAgent": true,
+    "showGpu": false,
+    "showGpuUsage": false,
+    "modeCpu": "same",
+    "modeMem": "same",
+    "modeDisk": "same",
+    "modeGpu": "same",
+    "hideVirtualGpu": true,
+    "selfProcLabel": "process",
+    "showSelfProc": true
+  },
+  "configSchema": {
+    "sendAs": {
+      "type": "enum",
+      "values": [
+        "card",
+        "text"
+      ],
+      "labels": {
+        "card": "卡片（图片）",
+        "text": "纯文本"
+      },
+      "label": "整机状态发什么",
+      "description": "卡片（图片）= 画成一张状态卡发出来，画不出来时会自动退回文字；纯文本 = 一开始就不画图，只发一条文字。想稳妥、不想要图片就选纯文本。",
+      "options": [
+        "card",
+        "text"
+      ]
+    },
+    "replyStyle": {
+      "type": "enum",
+      "values": [
+        "card",
+        "compact",
+        "detail"
+      ],
+      "labels": {
+        "card": "卡片（随上面一项）",
+        "compact": "短文本（约 6 行）",
+        "detail": "详细文本（逐行列出）"
+      },
+      "label": "回复形态",
+      "description": "卡片（默认）：结合上面「整机状态发什么」出图或出文字。compact：不管上面怎么选，都只发一条约 6 行的短文本。detail：把 CPU/内存/硬盘/显卡/进程全部逐行列出，信息最全但占行最多。",
+      "options": [
+        "card",
+        "compact",
+        "detail"
+      ]
+    },
+    "cardTheme": {
+      "type": "enum",
+      "values": [
+        "light",
+        "dark"
+      ],
+      "labels": {
+        "light": "浅色（亮白面板，配浅色壁纸）",
+        "dark": "深色（暗色面板，配深色壁纸）"
+      },
+      "label": "卡片深浅色",
+      "description": "浅色 = 亮白半透明面板 + 深色文字（浅色壁纸推荐）；深色 = 暗色半透明面板 + 白色文字。有背景图时同样生效；没有背景图时整张卡用对应底色。",
+      "options": [
+        "light",
+        "dark"
+      ]
+    },
+    "backgroundImage": {
+      "type": "string",
+      "label": "卡片背景图（留空则用技能自带图）",
+      "description": "留空 = 用技能目录下的 assets/background.jpg（换图：把新图改名成 background.jpg 覆盖进去，任意尺寸/比例都可以，会自动裁切压缩）。也可以填本地图片路径（如 D:\\pics\\bg.jpg）或 http(s) 图片网址。填错/取不到时自动退回纯色卡片，不会因此发不出图。",
+      "placeholder": "C:\\pics\\bg.jpg 或 https://…/bg.jpg"
+    },
+    "topListInCompact": {
+      "type": "number",
+      "label": "卡片/短消息里列几个最占内存的程序",
+      "description": "默认 2。回复形态为 card 或 compact 时生效；列得越多卡片越长，2 条通常最耐看。1~5。",
+      "min": 1,
+      "max": 5
+    },
+    "topN": {
+      "type": "number",
+      "label": "明细里列出几个最占内存的软件",
+      "description": "默认 8。只在「回复形态 = detail」时生效（compact 下明细只用于回答追问）。1~12。",
+      "min": 1,
+      "max": 12
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "查询超时（毫秒）",
+      "description": "默认 20000。整台电脑非常卡时查询会更慢，超时后会如实告诉模型「查不到」，而不是编一个数字。5000~60000。",
+      "min": 5000,
+      "max": 60000
+    },
+    "detailLevel": {
+      "type": "enum",
+      "values": [
+        "brief",
+        "detail"
+      ],
+      "labels": {
+        "brief": "精简",
+        "detail": "详细"
+      },
+      "label": "信息量",
+      "description": "精简：只留系统版本、处理器型号、CPU/内存、硬盘容量、软件占用。详细：额外给出系统 Build、CPU 全称与核心线程数、显卡型号、可用内存。",
+      "options": [
+        "brief",
+        "detail"
+      ]
+    },
+    "opacity": {
+      "type": "number",
+      "label": "面板不透明度（%）",
+      "description": "默认 55。数字越小越通透、越能看见背景图；太小时文字会不好读。0~100。",
+      "min": 0,
+      "max": 100,
+      "step": 5
+    },
+    "displayMode": {
+      "type": "enum",
+      "values": [
+        "ring",
+        "bar"
+      ],
+      "labels": {
+        "ring": "圆环",
+        "bar": "横条"
+      },
+      "label": "占用怎么画",
+      "description": "圆环：用环形仪表。横条：长条进度条（更省纵向空间）。这是**全局默认**——下面四项（CPU/内存/硬盘/显卡）可以各自覆盖。",
+      "options": [
+        "ring",
+        "bar"
+      ]
+    },
+    "showCpu": {
+      "type": "boolean",
+      "label": "显示 CPU 占用",
+      "description": "关掉后不采 CPU 占用、卡片上也不出现这一项。"
+    },
+    "showMem": {
+      "type": "boolean",
+      "label": "显示内存占用",
+      "description": "关掉后不显示内存那一项。"
+    },
+    "showDisk": {
+      "type": "boolean",
+      "label": "显示硬盘",
+      "description": "关掉后整块「硬盘」不出现。"
+    },
+    "showGpuUsage": {
+      "type": "boolean",
+      "label": "显示显卡占用",
+      "description": "勾上后单独出一块显卡占用（并额外采一次 GPU 引擎计数器，查询会慢约 1 秒）。注意：这是全局引擎最大值——Windows 不给\"占用属于哪块显卡\"的信息，所以不能按显卡分别显示。"
+    },
+    "showGpu": {
+      "type": "boolean",
+      "label": "在系统框里显示显卡型号",
+      "description": "仅「详细」信息量下生效：列出显卡型号。"
+    },
+    "showCpuInfo": {
+      "type": "boolean",
+      "label": "显示处理器型号",
+      "description": "系统框里的处理器一行。"
+    },
+    "showOs": {
+      "type": "boolean",
+      "label": "显示系统版本",
+      "description": "系统框里的版本一行；「详细」时会带上 Build 号。"
+    },
+    "showProcs": {
+      "type": "boolean",
+      "label": "显示最占内存的程序",
+      "description": "软件占用框里的榜单，条数由上面那项控制。"
+    },
+    "showQQAgent": {
+      "type": "boolean",
+      "label": "显示 QQ Agent 自身状态",
+      "description": "原先的叫法；包含占用内存与已运行时长。"
+    },
+    "modeCpu": {
+      "type": "enum",
+      "values": [
+        "same",
+        "ring",
+        "bar"
+      ],
+      "labels": {
+        "same": "跟随全局",
+        "ring": "圆环",
+        "bar": "横条"
+      },
+      "label": "CPU怎么画",
+      "description": "只影响CPU这一项：圆环 / 横条，或跟随上面「占用怎么画」的全局选择。",
+      "options": [
+        "same",
+        "ring",
+        "bar"
+      ]
+    },
+    "modeMem": {
+      "type": "enum",
+      "values": [
+        "same",
+        "ring",
+        "bar"
+      ],
+      "labels": {
+        "same": "跟随全局",
+        "ring": "圆环",
+        "bar": "横条"
+      },
+      "label": "内存怎么画",
+      "description": "只影响内存这一项：圆环 / 横条，或跟随上面「占用怎么画」的全局选择。",
+      "options": [
+        "same",
+        "ring",
+        "bar"
+      ]
+    },
+    "modeDisk": {
+      "type": "enum",
+      "values": [
+        "same",
+        "ring",
+        "bar"
+      ],
+      "labels": {
+        "same": "跟随全局",
+        "ring": "圆环",
+        "bar": "横条"
+      },
+      "label": "硬盘怎么画",
+      "description": "只影响硬盘这一项：圆环 / 横条，或跟随上面「占用怎么画」的全局选择。",
+      "options": [
+        "same",
+        "ring",
+        "bar"
+      ]
+    },
+    "modeGpu": {
+      "type": "enum",
+      "values": [
+        "same",
+        "ring",
+        "bar"
+      ],
+      "labels": {
+        "same": "跟随全局",
+        "ring": "圆环",
+        "bar": "横条"
+      },
+      "label": "显卡怎么画",
+      "description": "只影响显卡这一项：圆环 / 横条，或跟随上面「占用怎么画」的全局选择。",
+      "options": [
+        "same",
+        "ring",
+        "bar"
+      ]
+    },
+    "hideVirtualGpu": {
+      "type": "boolean",
+      "label": "隐藏虚拟显示器",
+      "description": "开着时，远程串流/虚拟显示适配器（如 GameViewer、OrayIdd）不会出现在显卡列表里 —— 它们不是真实显卡，占用挂在上面会让人看不懂。关掉可以看到全部适配器。"
+    },
+    "showSelfProc": {
+      "type": "boolean",
+      "label": "显示本进程自身状态",
+      "description": "显示运行机器人的那个进程自己的内存与已运行时长（读的是进程内部数据，精确值）。它和「QQ Agent 自身」那一项不重复：那个是 QQ Agent 相关全部进程的合计，这个是当前进程自己。"
+    },
+    "selfProcLabel": {
+      "type": "enum",
+      "values": [
+        "process",
+        "snowluma"
+      ],
+      "labels": {
+        "process": "本进程自身",
+        "snowluma": "SnowLuma 自身"
+      },
+      "options": [
+        "process",
+        "snowluma"
+      ],
+      "label": "本进程那一块的标题",
+      "description": "只改卡片上那几个字的叫法，数据的口径不变。默认「本进程自身」：实测技能由 QQ Agent 应用加载并运行在它的进程里（日志就写在 QQ Agent 的 logs 目录下），所以那一块读到的其实是 QQ Agent 进程自己。若你确认运行时是 SnowLuma，选「SnowLuma 自身」。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "pcstatus-note",
+        "title": "电脑状态查询",
+        "priority": 30,
+        "content": "群友问「电脑卡不卡」「CPU/内存/硬盘还剩多少」「开机多久了」「某个软件占多少内存」「QQ Agent 运行多久了」这类**运行着机器人的这台电脑**的状态时，用 pc_status 工具取真实数据，不要凭印象猜。工具返回的是此刻的实测值。\n\n【最重要：发完就收尾，别再补一条】工具的返回分两种：\n① 若写着**「状态卡片图已由工具直接发到群里了」**，说明图早已发出去、数据也全在图上——你**必须直接调用 finish 收尾**（summary 填「状态卡片已发送」），**不要再发任何消息、也不要复述图上的数字**。曾经在这里补过一句「上面这张就是刚查的」，结果群里变成一条图 + 一大段重复文字，群友反馈很啰嗦。只有群友明确追问图上没有的数据时才开口。\n② 若返回里给了被 `==` 包起来的「可直接原样发出」的文字，就**把那一整段照抄成一条消息发出去**（一次 send_message），不要拆成多条、也不要一行一条地念——之前逐行发被刷成十几条消息，群里很难看。\n两种情况后面都可能有「补充明细」，那只留着自己回答追问用，**不要主动发出去**。\n\n【只报工具给的数据】CPU 占用、内存用量、硬盘剩余、运行时长这些数字一律照工具返回值讲，不要自己估算或补一个「大概」。工具说查不到（比如那款软件没在运行），就如实说没在运行，别编一个时长。\n\n【想加自己的话就并到同一条里】可以在那段文字前后各加半句口语（比如「看着还行啊」），但**必须和它在同一条消息里**，不要为了加一句话再单发一条。\n\n【详细模式】如果群友明确说「详细点」「全都说说」，而工具的返回里只有简短版或卡片，就用返回里「补充明细」的内容组织一条稍长的消息——依然只发一条。\n\n【范围】工具只能查这台跑机器人的 Windows 电脑；对方问的是他自己手机或别的机器时，说明你只能看到运行机器人的这台电脑。"
+      }
+    ]
+  }
+}

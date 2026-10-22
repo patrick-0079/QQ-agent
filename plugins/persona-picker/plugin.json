@@ -1,0 +1,95 @@
+{
+  "id": "persona-picker",
+  "name": "自动切换人设（选人设）",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "message",
+  "entry": "index.js",
+  "description": "不用写规则：下拉选一个人设，选一种触发条件，被骂了就自动切过去，到点自动切回。人设下拉**实时读取人设库**（显示名称、存的是人设 id —— 改名后仍指向同一个人设）。与「自动切换人设」是同一件事的两种做法，建议二选一。",
+  "author": "本机定制",
+  "enabledByDefault": false,
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "enabled": false,
+    "target": "",
+    "trigger": "被@/点名+脏话",
+    "insultWords": "傻逼,煞笔,沙比,傻比,智障,弱智,脑瘫,nt,废物,垃圾,狗东西,去死,死妈,杂鱼,妈的,草泥马,贱,低能,蠢货,滚蛋,闭嘴,你算老几",
+    "praiseWords": "牛逼,太强了,好棒,厉害,可爱,喜欢你,好活,牛蛙,神了,膜拜",
+    "holdSeconds": 300,
+    "cooldownSeconds": 120,
+    "groups": "",
+    "extraNames": "大肥鱼,肥鱼",
+    "hint": true,
+    "verbose": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用",
+      "description": "总开关。默认关闭 —— 与「自动切换人设」是同一件事的两种做法，建议只开一个。两个都开时以「自动切换人设」为准（本插件会让位）。"
+    },
+    "target": {
+      "type": "enum",
+      "label": "切换成哪个人设",
+      "description": "下拉实时来自「人设管理」：显示的是人设名称，存的是人设 id。\n改名、改正文后仍然指向同一个人设（不需要重新选）。此处选一个就行，不需要和触发条件一一对应。",
+      "optionsSource": "personas",
+      "values": [],
+      "labels": {},
+      "default": ""
+    },
+    "trigger": {
+      "type": "enum",
+      "label": "什么时候切",
+      "description": "四种预设，不用自己写规则。\n· 被@/点名+脏话：只有 @ 了机器人、或消息里出现机器人名字、且带脏话时才切（默认，误触发最少）\n· 群里任何脏话：别人互骂也切，会非常频繁\n· 被@/点名：只要被叫到就切，不看内容\n· 被夸：命中夸人的词才切（配「夸人词表」用）",
+      "values": [
+        "被@/点名+脏话",
+        "群里任何脏话",
+        "被@/点名",
+        "被夸"
+      ],
+      "default": "被@/点名+脏话"
+    },
+    "insultWords": {
+      "type": "string",
+      "label": "脏话词表",
+      "description": "逗号分隔，已有默认值，一般不用改。只在「被@/点名+脏话」「群里任何脏话」两种触发方式下生效。"
+    },
+    "praiseWords": {
+      "type": "string",
+      "label": "夸人词表",
+      "description": "逗号分隔，只在触发方式选「被夸」时生效。"
+    },
+    "holdSeconds": {
+      "type": "number",
+      "label": "保持多少秒后切回",
+      "description": "默认 300 秒（5 分钟）。期间再次触发会顺延；到点自动恢复本群原本的人设。填 0 = 一直保持不切回。"
+    },
+    "cooldownSeconds": {
+      "type": "number",
+      "label": "两次切换的最小间隔（秒）",
+      "description": "默认 120 秒，防止人设来回横跳。"
+    },
+    "groups": {
+      "type": "string",
+      "label": "生效的群号（留空=全部）",
+      "description": "逗号分隔的群号白名单。留空 = 所有群聊/私聊都生效。例：964925422,972883182"
+    },
+    "extraNames": {
+      "type": "string",
+      "label": "额外算作「在叫我」的名字",
+      "description": "逗号分隔。除了配置里的 botName，这些词出现在消息里也视为在跟机器人说话。默认「大肥鱼,肥鱼」。"
+    },
+    "hint": {
+      "type": "boolean",
+      "label": "附加「正在气头上」说明",
+      "description": "开启后，切换期间会在提示词末尾加一段说明，告诉模型刚刚被谁骂了、用哪个人设说话，并禁止它提及「人设/切换」这类词。"
+    },
+    "verbose": {
+      "type": "boolean",
+      "label": "输出切换日志",
+      "description": "开启后每次切换/顺延/切回都会在控制台打印一行，便于确认生效。"
+    }
+  },
+  "prompt": null
+}

@@ -1,0 +1,453 @@
+{
+  "id": "mc-status",
+  "name": "服务器状态查询",
+  "version": "1.2.43",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "查询 Minecraft 服务器状态并发一张卡片到会话：服务器图标、在线人数与上限、版本、延迟（本机到服务器的实测延迟）、MOTD（按服务器自带的颜色渲染）、在线玩家样本名单。支持 Java 版与基岩版，可配多个服务器，多台时卡片顶部给出汇总行；服务器较多时卡片只画前 N 台（默认 8，可在设置里改）。数据源可换：默认直连（自己实现 Server List Ping / RakNet 协议，不经过第三方服务），也可选第三方 API 或自建接口（填 URL 模板 + 字段映射）。另有三项可选功能：近 24 小时人数曲线（后台自动定时采集，默认每 15 分钟一次、静默不发消息；一段的长度自动跟随采集频次）、人数变化播报与宕机告警（默认关、需填群号）、RCON 执行命令（默认关、仅主人可用，默认只放行只读命令）。也可以在请求里带上地址查未配置的服务器（如「看看 mc.hypixel.net」）；内网与本机地址默认拒绝，需显式开启开关。用法：发「服务器」「我的服」「mc」「我的世界」「服务器曲线」「人数曲线」即可。",
+  "author": "QQ Agent",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "permissions": [
+    "web_fetch"
+  ],
+  "capabilities": [
+    "status.mc-status"
+  ],
+  "settings": {
+    "servers": "",
+    "source": "direct",
+    "timeout": 5000,
+    "useSrv": true,
+    "cacheSeconds": 30,
+    "maxCardRows": 8,
+    "colorMotd": true,
+    "cardMode": "auto",
+    "theme": "dark",
+    "apiBase": "https://api.mcsrvstat.us",
+    "apiUrl": "",
+    "customMap": "",
+    "trendAutoEnabled": true,
+    "trendHours": 24,
+    "trendSlotMinutes": 15,
+    "trendDetailRows": 8,
+    "adhocAllowPrivate": false,
+    "rconEnabled": false,
+    "rconHost": "",
+    "rconPort": 25575,
+    "rconPassword": "",
+    "rconTimeout": 5000,
+    "rconAllowDangerous": false,
+    "watchEnabled": false,
+    "watchGroups": "",
+    "watchIntervalSec": 120,
+    "watchMode": "change",
+    "watchQuietHours": "23:00-08:00",
+    "useQuery": false,
+    "logSource": "off",
+    "logFilePath": "",
+    "logApiUrl": "",
+    "logApiToken": "",
+    "logTimeout": 5000,
+    "logLines": 200,
+    "logMaxChars": 3000,
+    "logMaxBlocks": 5,
+    "logAdminOnly": true,
+    "logAnalyzeEnabled": false,
+    "logAnalyzeModel": "",
+    "logAnalyzeEndpoint": "",
+    "logAnalyzeApiKey": ""
+  },
+  "configSchema": {
+    "servers": {
+      "type": "string",
+      "multiline": true,
+      "label": "服务器列表（每行一个）",
+      "placeholder": "Hypixel|mc.hypixel.net\n我的服|1.2.3.4:25566\n基岩服|play.example.com:19132|bedrock",
+      "description": "格式「名称|地址:端口|版本」，后两段可省（端口默认 Java 25565 / 基岩 19132，版本默认 java）。也支持直接写 JSON 数组：[{\"name\":\"我的服\",\"host\":\"1.2.3.4\",\"port\":25565,\"edition\":\"java\"}]。地址可以填域名或 IP；填域名时会自动查 SRV 记录（很多服务器把真实端口藏在 SRV 里）。",
+      "group": "服务器查询"
+    },
+    "source": {
+      "type": "enum",
+      "label": "数据源",
+      "values": [
+        "direct",
+        "mcsrvstat",
+        "custom"
+      ],
+      "description": "⚠️ 强烈建议用「直连」：自己实现 MC 协议，不依赖任何第三方，延迟也是本机到服务器的真实值。2026-09-21 实测本机两家第三方 API 都不通（mcsrvstat.us 自身 DNS 故障却把服务器报成「离线」，mcstatus.io 返回空），而直连 hypixel / mineplex / cubecraft 全部正常。第三方源只留给网络环境不同的机器。可选值：direct=直连服务器（推荐）／mcsrvstat=第三方 API／custom=自建接口",
+      "group": "服务器查询"
+    },
+    "timeout": {
+      "type": "number",
+      "label": "连接超时（毫秒）",
+      "description": "默认 5000。网络差或服务器在国外可以适当调大（比如 8000），但也别太大 —— 服务器关了的话每次查询都要干等到超时。",
+      "group": "服务器查询"
+    },
+    "useSrv": {
+      "type": "boolean",
+      "label": "自动解析 SRV 记录",
+      "description": "默认开。查 _minecraft._tcp.<域名>，把真实端口找出来（很多服务器域名和 MC 实际端口不一致）。不解析就会连错端口超时。⚠️ 只有当你显式填了非默认端口时，才以你填的为准。填 IP 地址时不会查（也没必要）。",
+      "group": "服务器查询"
+    },
+    "cacheSeconds": {
+      "type": "number",
+      "label": "结果缓存秒数",
+      "description": "默认 30 秒。⚠️ 这一项**只管后台路径**（自动采集、状态面板探测），群里发「\\服务器」指令**每次都会真查一次、不看缓存**（2026-09-22 用户要求：输出一次指令就查询一次）。MC 状态变化快，缓存本来也不能太长；设 0 表示后台也一律重新查。",
+      "group": "服务器查询"
+    },
+    "apiBase": {
+      "type": "string",
+      "label": "mcsrvstat API 地址（仅第三方源）",
+      "description": "默认 https://api.mcsrvstat.us，一般不用改。只有数据源选了「mcsrvstat」才生效。",
+      "group": "服务器查询"
+    },
+    "apiUrl": {
+      "type": "string",
+      "label": "自建接口 URL（仅自建源）",
+      "placeholder": "https://example.com/api/mc?host={host}&port={port}",
+      "description": "数据源选「自建 HTTP 接口」时填。支持占位符 {host} {port} {edition}。接口要返回 JSON。",
+      "group": "服务器查询"
+    },
+    "customMap": {
+      "type": "string",
+      "multiline": true,
+      "label": "自建接口字段映射（仅自建源）",
+      "placeholder": "{\"online\":\"data.online\",\"playersOnline\":\"data.players.now\",\"version\":\"data.ver\"}",
+      "description": "JSON 对象，值是用点号分隔的取值路径。不填则用默认路径（online / version / players.online / players.max / players.list / motd / latency）。",
+      "group": "服务器查询"
+    },
+    "adhocAllowPrivate": {
+      "type": "boolean",
+      "label": "允许查内网地址（默认关）",
+      "description": "⚠️ 群里谁都能发一句话让机器人去连 —— 默认挡住 127.* / 10.* / 192.168.* / 172.16-31.* 等内网和本机地址，否则「\\服务器 你的内网IP:22」就成了内网端口扫描器。域名也会先解析再判断，防止用域名绕过去。你确实要在群里查自己内网的服才开。",
+      "group": "服务器查询"
+    },
+    "useQuery": {
+      "type": "boolean",
+      "label": "启用 Query 协议（完整玩家名单）",
+      "description": "默认关。MC 默认也关（server.properties 里 enable-query=false）。打开后能拿到 Server List Ping 给不了的：完整玩家名单（sample 只是样本、很多服干脆不给）、插件列表、地图名、游戏模式。需要服务器那边也开 enable-query=true 才有效；开了没反应就是服务器没开。",
+      "group": "服务器查询"
+    },
+    "maxCardRows": {
+      "type": "number",
+      "label": "卡片最多画几台服务器",
+      "description": "默认 8。卡片高度没有上限，服务器一多图就长得没法看（实测 10 台 = 1280×2100，发到 QQ 里缩成一团）。超过就只画前 N 台，卡片脚注会写明总数；文字摘要仍是全量，不影响追问。填 0 = 不限制（多少台都画）。",
+      "group": "卡片显示"
+    },
+    "colorMotd": {
+      "type": "boolean",
+      "label": "MOTD 显示彩色",
+      "description": "默认开。按服务器 MOTD 自带的颜色渲染简介（支持 § 格式码和 JSON 组件两种写法），粗体/斜体/下划线也一并还原。颜色会按卡片主题自动调亮度，避免出现黑底黑字这种看不见的组合。关掉就统一用默认文字色。",
+      "group": "卡片显示"
+    },
+    "cardMode": {
+      "type": "enum",
+      "label": "输出方式",
+      "values": [
+        "auto",
+        "text",
+        "image"
+      ],
+      "description": "默认「自动」。图片渲染走 Electron 离屏截图，失败会自动回退成文字卡，不会查不到东西。可选值：auto=自动（默认）／text=纯文字／image=强制图片",
+      "group": "卡片显示"
+    },
+    "theme": {
+      "type": "enum",
+      "label": "卡片配色",
+      "values": [
+        "dark",
+        "light"
+      ],
+      "description": "卡片图的配色，跟天气卡、状态面板同一套风格。可选值：dark=深色／light=浅色",
+      "group": "卡片显示"
+    },
+    "trendAutoEnabled": {
+      "type": "boolean",
+      "label": "启用自动定时采集人数（曲线专用）",
+      "description": "默认开。后台按下面选的间隔定期查一遍服务器、**只写进曲线历史，一条消息都不发** —— 曲线从此自己就有连续数据，不用靠你手动查才记一笔。⚠️ 关掉的话曲线只剩你手动查询时的零散样本（没查过的时段图上会断开）。只采「服务器列表」里配好的服务器。开了「人数播报」且它的间隔不比这里长时，采集会复用播报的采样，不会重复打服务器。",
+      "group": "人数曲线"
+    },
+    "trendSlotMinutes": {
+      "type": "slider",
+      "label": "曲线密度：一段 = 多久查一次",
+      "stops": [
+        5,
+        10,
+        15,
+        20,
+        30,
+        60,
+        90,
+        120,
+        240
+      ],
+      "unit": "分钟",
+      "description": "⚠️ **这一项同时决定两件事**：图上一段代表多长时间，**以及后台多久自动查一次服务器** —— 两者强绑定，拖到 20 分钟就是每 20 分钟查一次、图上一段正好 20 分钟，一轮采样不多不少落进一个点。以前这两项是分开填的，结果经常对不上（段画得比查询密 → 一大片空格子，「刚查完图上却看不见」）。拖得越密曲线越细，但对服务器的连接也越频繁 —— 5 分钟一段 = 一天 288 次查询，30 分钟一段 = 48 次。",
+      "group": "人数曲线"
+    },
+    "trendHours": {
+      "type": "number",
+      "label": "人数曲线看多少小时",
+      "description": "默认 24。曲线的数据来自后台定时采集 + 每次查询时顺手记的一笔，没采集到的时段图上会断开（不会画成 0 人）。",
+      "group": "人数曲线"
+    },
+    "trendDetailRows": {
+      "type": "number",
+      "label": "曲线下方显示几行明细",
+      "description": "默认 8 行：每行一个点（大字=时间段，小字=人数），取最近有数据的几段。填 0 就不显示明细区（卡片更矮）。",
+      "group": "人数曲线"
+    },
+    "watchEnabled": {
+      "type": "boolean",
+      "label": "启用人数变化播报（默认关）",
+      "description": "定时轮询服务器，有人进出或服务器开关时往群里发一条。**默认关闭** —— 装了插件就开始刷群很招人烦。必须同时填群号才会真的启动。",
+      "group": "人数播报"
+    },
+    "watchGroups": {
+      "type": "string",
+      "label": "播报发到哪些群",
+      "placeholder": "123456789",
+      "description": "⚠️ 敏感信息：多个群号用逗号分隔。**打包分享插件时记得删掉**。不填的话播报不会启动。",
+      "group": "人数播报"
+    },
+    "watchIntervalSec": {
+      "type": "number",
+      "label": "轮询间隔（秒）",
+      "description": "默认 120，最短 30 —— 每次轮询都是一次真实握手，太密既浪费又容易被人当成攻击。它比曲线的采集间隔（见「人数曲线」→「一段 = 多久查一次」）更密时，采集会直接复用播报的样本，不会重复打服务器。曲线一段的长度只由那一项决定，不再跟着这里变。",
+      "group": "人数播报"
+    },
+    "watchMode": {
+      "type": "enum",
+      "label": "播报什么",
+      "values": [
+        "change",
+        "status"
+      ],
+      "description": "默认「人数变化 + 开关服」。嫌吵就选「只报开关服」。每次轮询最多合并成一条消息，不会一台服务器一条。可选值：change=人数变化+开关服（默认）／status=只报开关服",
+      "group": "人数播报"
+    },
+    "watchQuietHours": {
+      "type": "string",
+      "label": "静默时段",
+      "placeholder": "23:00-08:00",
+      "description": "默认 23:00-08:00，这段时间内一条都不发（包括宕机告警 —— 半夜叫醒你也修不了）。留空表示全天都发。支持跨零点。",
+      "group": "人数播报"
+    },
+    "rconEnabled": {
+      "type": "boolean",
+      "label": "启用 RCON（默认关）",
+      "description": "⚠️ 开了之后可以在群里远程执行服务器命令。**默认关闭**，且只有机器人主人能用；默认还只放行只读命令（list / whitelist list / seed 等）。服务器要开 enable-rcon=true 并设好 rcon.password（在 server.properties 里）。",
+      "group": "RCON"
+    },
+    "rconHost": {
+      "type": "string",
+      "label": "RCON 地址",
+      "description": "留空则用服务器列表里第一台的地址。RCON 的端口跟游戏端口不是一回事（默认 25575）。",
+      "group": "RCON"
+    },
+    "rconPort": {
+      "type": "number",
+      "label": "RCON 端口",
+      "description": "默认 25575，跟 server.properties 里的 rcon.port 一致。",
+      "group": "RCON"
+    },
+    "rconPassword": {
+      "type": "string",
+      "label": "RCON 密码",
+      "description": "⚠️ 敏感信息：填 server.properties 里 rcon.password 的值。不会出现在任何日志、回复或卡片里；但**打包分享插件时记得删掉**。",
+      "group": "RCON"
+    },
+    "rconTimeout": {
+      "type": "number",
+      "label": "RCON 超时（毫秒）",
+      "description": "默认 5000。",
+      "group": "RCON"
+    },
+    "rconAllowDangerous": {
+      "type": "boolean",
+      "label": "允许危险命令（默认关）",
+      "description": "⚠️⚠️ 打开后 op / ban / kick / stop / gamemode 这类**会改变服务器状态**的命令也能执行了（仍然只有主人能用）。不开的话只放行只读命令。开之前想清楚：群里一句话就能改你的服务器。",
+      "group": "RCON"
+    },
+    "logSource": {
+      "type": "enum",
+      "label": "日志来源",
+      "values": [
+        "off",
+        "file",
+        "http"
+      ],
+      "description": "RCON 只能执行命令、拿不到控制台输出（协议硬限制），要看服务器发生了什么必须走日志通道。服务器在本机或能访问其 logs 目录选「文件」；远端租用服选「HTTP」，需要在服务器装桥接插件（源码在插件目录 server-bridge/ 下）。可选值：off=关闭（默认）／file=本地或共享文件／http=HTTP 接口",
+      "group": "日志与 AI 分析"
+    },
+    "logFilePath": {
+      "type": "string",
+      "label": "日志文件路径（file 模式）",
+      "placeholder": "E://mc//logs//latest.log",
+      "description": "填服务器 logs/latest.log 的完整路径，本机路径或局域网共享路径（如 \\\\NAS\\mc\\logs\\latest.log）都行。只读文件尾部，几百 MB 的大日志也不会卡。Cuberite 用户注意：它每次启动新开一个 logs/LOG_<时间戳>.txt（文件名会变），要填固定路径就填控制台输出重定向到的 cuberite.log。",
+      "group": "日志与 AI 分析"
+    },
+    "logApiUrl": {
+      "type": "string",
+      "label": "日志接口地址（http 模式）",
+      "placeholder": "http://你的服务器IP:25585/logs?lines=200",
+      "description": "服务端桥接插件提供的地址，支持 {host} {port} 占位符。返回纯文本，或 {\"lines\":[\"...\"]}。",
+      "group": "日志与 AI 分析"
+    },
+    "logApiToken": {
+      "type": "string",
+      "label": "日志接口密钥（http 模式）",
+      "description": "对应桥接插件里的 token。走请求头传递，不会留在 URL 和服务端访问日志里。⚠️ 属敏感信息，分享插件前记得清掉。",
+      "group": "日志与 AI 分析"
+    },
+    "logTimeout": {
+      "type": "number",
+      "label": "日志接口超时（毫秒）",
+      "description": "默认 5000。",
+      "group": "日志与 AI 分析"
+    },
+    "logLines": {
+      "type": "number",
+      "label": "每次读多少行",
+      "description": "默认 200。只是读取窗口，最终喂给模型的内容还会按字数再截一次。",
+      "group": "日志与 AI 分析"
+    },
+    "logMaxChars": {
+      "type": "number",
+      "label": "最多喂给模型多少字",
+      "description": "默认 3000。日志太长既费 token 又淹没有用的信息。",
+      "group": "日志与 AI 分析"
+    },
+    "logMaxBlocks": {
+      "type": "number",
+      "label": "最多提取几段报错",
+      "description": "默认 5。提取时会把相同堆栈的重复报错合并计数，不会刷屏。",
+      "group": "日志与 AI 分析"
+    },
+    "logAdminOnly": {
+      "type": "boolean",
+      "label": "日志仅主人可见",
+      "description": "默认开。日志里可能有玩家 IP、聊天内容，默认只给主人看。没配主人 QQ 号时会一律拒绝（fail closed）。",
+      "group": "日志与 AI 分析"
+    },
+    "logAnalyzeEnabled": {
+      "type": "boolean",
+      "label": "用指定模型分析日志（额外计费）",
+      "description": "默认关 —— 关着的时候日志交给当前对话的模型顺带分析，不额外花钱。打开后每次查日志会**额外调一次 API**，用下面填的模型单独分析并直接把结论发到会话。",
+      "group": "日志与 AI 分析"
+    },
+    "logAnalyzeModel": {
+      "type": "string",
+      "label": "分析用模型（额外计费时才生效）",
+      "placeholder": "deepseek-chat",
+      "description": "填模型 id。端点和密钥留空就复用主配置（同一供应商换个模型名的情况）。",
+      "group": "日志与 AI 分析"
+    },
+    "logAnalyzeEndpoint": {
+      "type": "string",
+      "label": "分析模型接口地址（可留空）",
+      "description": "留空用主配置。要接另一家供应商时填。",
+      "group": "日志与 AI 分析"
+    },
+    "logAnalyzeApiKey": {
+      "type": "string",
+      "label": "分析模型密钥（可留空）",
+      "description": "留空用主配置的密钥。⚠️ 属敏感信息。",
+      "group": "日志与 AI 分析"
+    }
+  },
+  "prompt": {
+    "when": "当用户发送以反斜杠开头的服务器指令时——「\\服务器」「\\服务器状态」「\\我的服」「\\mc」「\\我的世界」，查游戏服务器（Minecraft / 我的世界）的在线人数、版本、延迟、MOTD、玩家名单；「\\服务器曲线」「\\人数曲线」看近 24 小时每小时人数；「\\rcon」「\\执行命令」在服务器上执行命令；「\\日志」「\\报错」「\\控制台」看服务器日志并排查崩溃原因。\n⚠️ **没有反斜杠就不响应**：用户闲聊里提到「服务器卡不卡」「我的服开着吗」「mc 怎么样」这类话，**不要**调用 —— 只有**反斜杠 + 指令词**才算指令（正因为有这道门槛，「mc」才敢拿回来当指令词用）。\n⚠️ 只管**游戏**服务器；机器人自身的状态/内存/CPU/用量属于 ai-status，不要抢。",
+    "examples": [
+      "\\服务器",
+      "\\服务器状态",
+      "\\我的服",
+      "\\mc",
+      "\\我的世界",
+      "\\服务器 mc.hypixel.net",
+      "\\服务器曲线",
+      "\\rcon list",
+      "\\日志",
+      "\\报错",
+      "\\控制台",
+      "\\日志 搜索 Exception"
+    ],
+    "instruction": "调用 get_mc_status 工具即可 —— 结果由工具**直接发到当前会话**，不要再用发送工具转发或复述卡片全部内容。\n【回复时每台服务器都要点到，一台都不许漏】工具返回的「共 N 台」就是清单：只有 1 台就用一句话带过（如「你的服在线 3 人，延迟 40ms」）；**多台就一行一台**（「名字 + 在线/离线 + 人数 + 延迟」），只报这四项。⚠️ 查了 5 台却只提 1 台，等于另外 4 台白查了，用户会以为没查到 —— 这是明确要避免的错。仍然不要复述 MOTD、版本、在线玩家名单等图上已有的细节。\n**指令里带了地址就传 name**：如「\\服务器 mc.hypixel.net」→ name=\"mc.hypixel.net\"，没配过的服务器也能直接查（内网地址会被拒绝）。没带地址就不传 name（查设置的全部）。\n⚠️ 结果里的数字都是实测值，**不要估算人数、不要编造延迟、不要说某个玩家在线**（除非摘要里给了名字）。\n⚠️ **「查不通」不等于「服务器关了」**：连不上可能是服务器关了，也可能是网络问题或防火墙拦截，摘要里两种情况措辞不同，照着说，别自己下结论。\n延迟分级：<100ms 流畅、<200ms 良好、<400ms 偏卡、更高很卡；摘要给了延迟就据此回答「卡不卡」，没给就说没测到。\n看趋势/「什么时候人最多」才用 get_mc_trend；数据来自**后台自动定时采集** + 每次查询的记录，没采集到的时段是空的，**不要说成 0 人**。\nmc_rcon_command 执行服务器命令：用户发「\\rcon」或**口头说**要做什么都直接调用（如「给某玩家一组金锭」→ give 玩家名 gold_ingot 64）。⚠️ 以下 give 限制**只对老服务端（1.13 前）生效**，工具会自动探测服务器版本自适应：对 1.13+ 新服（Paper/原版 1.21 等），@a 选择器和扁平化物品名（oak_log 等）直接用即可，give 也会正常回显。老服时：不支持目标选择器（@a 一律换成确切的玩家名，先 list 查名字）；物品名用旧版名或数字 ID（原木=log/17、金锭=gold_ingot/266，常见扁平化名工具会自动改写，stripped_ 原木等 1.13 新增内容别发）；一次最多 64 个；give 成败不回显，工具提示「没返回内容」时要让玩家上游戏确认，不要说「已经给了」。不要自己加 execute 或 ~ 坐标（老服没有）；工具自己会校验权限和白名单，被拒就照实说被拒。\n服务器列表为空且指令没带地址时，如实告诉用户还没配置，并说明可以去控制台填「名称|地址:端口」，也可以直接在指令里带地址查。\n⚠️ 这些工具**只有用户发了以反斜杠开头的指令才会出现**。既然你现在能看到，说明用户确实发了指令，照做即可。\n看日志/排查崩溃用 mc_server_log：默认 mode=errors（提取报错块，连堆栈一起给）；\"最近发生了什么\"用 tail；找特定内容用 search + keyword。⚠️ **拿到日志后要分析原因并给解决办法**，不要把原始日志整段复述给用户 —— 用户要的是结论，不是日志原文。⚠️ 如果工具返回说\"已用 XXX 分析并把结论发到会话\"，说明结论已经发出去了，**绝对不要再说一遍**。⚠️ 日志里没写的东西不要编：没查到报错就如实说没查到，不要猜原因。⚠️ 这些工具**只有用户发了以反斜杠开头的指令才会出现**。既然你现在能看到，说明用户确实发了指令，照做即可。"
+  },
+  "tools": [
+    {
+      "id": "get_mc_status",
+      "name": "查服务器状态",
+      "description": "查询 Minecraft 服务器状态（在线人数、版本、延迟、MOTD、玩家名单）并发送到当前会话。每次调用都真查一次（不看缓存）。支持指令里直接带地址查没配过的服务器。",
+      "category": "utility",
+      "icon": "🎮"
+    },
+    {
+      "id": "get_mc_trend",
+      "name": "查服务器人数曲线",
+      "description": "查询服务器近 24 小时每小时在线人数曲线（峰值/平均/什么时候人最多）并发送到当前会话。",
+      "category": "utility",
+      "icon": "📈"
+    },
+    {
+      "id": "mc_rcon_command",
+      "name": "执行服务器命令",
+      "description": "通过 RCON 在 Minecraft 服务器上执行一条命令（默认关闭、仅主人、默认只放行只读命令）。工具自适应服务端世代：老服（1.13 前，如 Cuberite）不支持 @a 等选择器、物品名要旧版名/数字 ID、give 不回显需玩家确认；1.13+ 新服则全部正常语法直接用。",
+      "category": "utility",
+      "icon": "⌨️"
+    },
+    {
+      "id": "mc_server_log",
+      "name": "查服务器日志",
+      "description": "读取 Minecraft 服务器控制台日志（报错/关键词/最近若干行），用于排查崩溃原因。",
+      "category": "utility",
+      "icon": "📜"
+    }
+  ],
+  "commandOnly": true,
+  "commandRoute": [
+    {
+      "commands": [
+        "服务器曲线",
+        "人数曲线"
+      ],
+      "tool": "get_mc_trend",
+      "argName": "name",
+      "argFrom": "rest"
+    },
+    {
+      "commands": [
+        "服务器",
+        "服务器状态",
+        "我的服",
+        "mc",
+        "mc服务器",
+        "我的世界"
+      ],
+      "tool": "get_mc_status",
+      "argName": "name",
+      "argFrom": "rest"
+    }
+  ],
+  "commands": [
+    "服务器",
+    "服务器状态",
+    "我的服",
+    "服务器曲线",
+    "人数曲线",
+    "mc",
+    "mc服务器",
+    "我的世界",
+    "rcon",
+    "执行命令",
+    "服务器命令",
+    "日志",
+    "报错",
+    "控制台",
+    "崩溃"
+  ],
+  "commandFreeTools": [
+    "mc_rcon_command"
+  ]
+}

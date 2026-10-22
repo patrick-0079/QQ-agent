@@ -1,0 +1,165 @@
+{
+  "id": "steam-query",
+  "name": "Steam 查价",
+  "version": "1.2.3",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "查 Steam 游戏的价格、折扣、好评率、发售日与平台。发「查一下死亡搁浅2多少钱」这类话，或直接说游戏名，就出一张卡片；也可以直接给 appid。一次查多个用逗号分隔（如「死亡搁浅2,死亡搁浅,地铁:离乡」，最多 5 个）。零配置：只用 Steam 商店的公开接口，不需要申请 API Key。关注/取关直接在群里说一句就行（「关注 死亡搁浅2」「取关 死亡搁浅」），不用去控制台改配置；也可以在控制台填「打折关注列表」批量维护，两边会自动合并。另带「打折播报」：每天定时批量查价，折扣到线了自动播报到指定群。",
+  "author": "QQ Agent",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "permissions": [],
+  "capabilities": [
+    "status.steam-query"
+  ],
+  "requires": [],
+  "commandOnly": true,
+  "commands": [
+    "steam"
+  ],
+  "tools": [
+    {
+      "id": "steam_query",
+      "name": "查 Steam 游戏",
+      "description": "按名字或 appid 查 Steam 游戏的价格、折扣、好评率、发售日、平台。由指令直达链路调用（用户发 @机器人 \\steam 游戏名），模型一般不会见到它。",
+      "category": "utility",
+      "icon": "🎮"
+    }
+  ],
+  "commandRoute": [
+    {
+      "tool": "steam_query",
+      "commands": [
+        "steam"
+      ]
+    }
+  ],
+  "settings": {
+    "enabled": true,
+    "countryCode": "cn",
+    "language": "schinese",
+    "timeoutMs": 10000,
+    "retries": 3,
+    "maxPerMinute": 8,
+    "showReviews": true,
+    "renderCard": true,
+    "theme": "dark",
+    "watchList": "",
+    "broadcastTime": "",
+    "broadcastTargets": "",
+    "minDiscountPercent": 25,
+    "apiKey": "",
+    "playWatchEnabled": false,
+    "playWatchIntervalMin": 30,
+    "playWatchTargets": ""
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用查价",
+      "description": "关掉后 \\steam 不再是有效指令（发了也不响应），定时播报也一起停。",
+      "group": "查询"
+    },
+    "countryCode": {
+      "type": "string",
+      "label": "商店区域（cc）",
+      "description": "决定价格用哪个区的货币。中国区填 cn（默认，返回人民币 CNY）。换成 us 就是美元。⚠️ Steam 会参考请求 IP 判断区域，机器在国内填 cn 最匹配。",
+      "group": "查询"
+    },
+    "language": {
+      "type": "string",
+      "label": "语言（l）",
+      "description": "游戏名与简介的语言。schinese=简体中文（默认），english=英文，tchinese=繁体中文。",
+      "group": "查询"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "单次请求超时（毫秒）",
+      "description": "默认 10000（10 秒）。Steam 的接口偶尔会卡满超时（见下一条重试），超时设太小会把本来能成功的请求也判死。",
+      "group": "查询"
+    },
+    "retries": {
+      "type": "number",
+      "label": "失败重试次数",
+      "description": "默认 3。⚠️ 这个不是可有可无的：api.steampowered.com 每次请求会重新解析域名，轮到被阻断的 IP 就会卡满超时（实测单发成功率只有约 50%，失败要 6~8 秒才返回）。重试 3 次能把成功率提到 85% 以上。填 1 就是只试一次。",
+      "group": "查询"
+    },
+    "maxPerMinute": {
+      "type": "number",
+      "label": "每分钟最多查几次",
+      "description": "防止有人刷指令。默认 8。超出会被拒并提示稍后再试。Steam 商店接口本身约 200 次/5 分钟/IP。",
+      "group": "查询"
+    },
+    "showReviews": {
+      "type": "boolean",
+      "label": "显示好评率",
+      "description": "开=卡片上带好评率与评价总数（多一次请求，稍慢一点）；关=只查价格和基本信息，更快。",
+      "group": "查询"
+    },
+    "renderCard": {
+      "type": "boolean",
+      "label": "出图片卡片",
+      "description": "开=渲染成一张图片发出（和天气卡、MC 卡风格一致）；关=发纯文字。渲染失败时无论开关如何都会自动降级成文字。",
+      "group": "查询"
+    },
+    "theme": {
+      "type": "enum",
+      "values": [
+        "dark",
+        "light"
+      ],
+      "label": "卡片配色",
+      "description": "dark 深色（默认）/ light 浅色。改完下一条查询即生效。深浅两套的折扣绿与品牌蓝是分别调过的 —— 亮绿放在白卡上看不清，所以浅色那套用的是压暗过的深绿。",
+      "group": "查询"
+    },
+    "watchList": {
+      "type": "string",
+      "label": "打折关注列表",
+      "description": "每行一个（也支持逗号分隔）：游戏名或 appid 都行。填好后用「\\steam 打折」看当前折扣，配合下面的定时播报可以自动推降价款。\n例：\n  1091500\n  艾尔登法环\n  赛博朋克 2077",
+      "group": "打折播报",
+      "multiline": true
+    },
+    "broadcastTime": {
+      "type": "string",
+      "label": "每日播报时间",
+      "description": "填 HH:MM（24 小时制，如 20:00）。留空 = 不自动播报。只播报「折扣 ≥ 下面那个门槛」的游戏；一个都没有时发一句「今天没有达到门槛的打折」，不会静默。",
+      "group": "打折播报"
+    },
+    "broadcastTargets": {
+      "type": "string",
+      "label": "播报到哪些群（群号，逗号分隔）",
+      "description": "留空 = 不播报（必须先填群号）。机器人拉不进或已被移出的群会自动跳过。",
+      "group": "打折播报"
+    },
+    "minDiscountPercent": {
+      "type": "number",
+      "label": "折扣门槛（%）",
+      "description": "只有折扣达到这个百分比才播报。默认 25（即 75 折及以下）。填 0 = 只要打折就报。",
+      "group": "打折播报"
+    },
+    "apiKey": {
+      "type": "string",
+      "label": "Steam API 密钥（可选）",
+      "description": "留空 = 只启用查价与打折播报（这两项不需要密钥，现在就能用）。\n填上之后解锁「绑定账号 / 我的资料 / 谁在玩 / 开黑播报」这些**玩家**功能。\n申请：https://steamcommunity.com/dev/apikey （⚠️ 该页面在 steamcommunity.com，国内通常连不上，需要开代理；申请要求账号非受限，域名字段可以写 localhost）\n⚠️ 只能看到**对方公开**的资料：对方把「游戏详情」设为仅好友可见时，时长与在玩状态拿不到，这是 Steam 的规则不是故障。",
+      "group": "玩家功能"
+    },
+    "playWatchEnabled": {
+      "type": "boolean",
+      "label": "开黑播报",
+      "description": "开=定时检查绑定的群友有没有刚开始玩游戏，有就在群里报一句「XX 开始玩 YY 了」。需要上面填了密钥。默认关。\n只在**状态发生变化**时播（从没玩→在玩、换了个游戏），不会每轮重复刷屏。",
+      "group": "玩家功能"
+    },
+    "playWatchIntervalMin": {
+      "type": "number",
+      "label": "开黑检查间隔（分钟）",
+      "description": "多久看一眼。默认 30 分钟。填太小会频繁调用 Steam 接口（每次失败要重试，占时间），建议 15~60。",
+      "group": "玩家功能"
+    },
+    "playWatchTargets": {
+      "type": "string",
+      "label": "开黑播报到哪些群",
+      "description": "群号，逗号分隔。留空 = 复用上面「打折播报」填的群号。",
+      "group": "玩家功能"
+    }
+  }
+}

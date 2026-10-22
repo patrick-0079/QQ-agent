@@ -1,0 +1,34 @@
+{
+  "id": "context-reuse",
+  "name": "上下文延续",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "同一会话的连续消息共享最近几轮对话历史，相当于伪 session 复用。提高 LLM 缓存命中率（前缀越来越长），同时让机器人回复更连贯、记得之前聊过什么。",
+  "author": "本地自建",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": true,
+  "requires": [],
+  "settings": {
+    "maxTurns": 3,
+    "expireMinutes": 5
+  },
+  "configSchema": {
+    "maxTurns": {
+      "type": "number",
+      "label": "保留最近几轮对话",
+      "description": "同一会话内，把最近几轮的「用户说+机器人回复」注入到下一次请求里。轮数越多缓存命中率越高，但 token 也越多。默认 3。",
+      "min": 0,
+      "max": 10
+    },
+    "expireMinutes": {
+      "type": "number",
+      "label": "上下文过期时间（分钟）",
+      "description": "多久没说话后，之前的对话历史就忘掉，下次重新开始。默认 5 分钟。",
+      "min": 1,
+      "max": 60
+    }
+  },
+  "prompt": null
+}

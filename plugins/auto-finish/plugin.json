@@ -1,0 +1,46 @@
+{
+  "id": "auto-finish",
+  "name": "省token·投递即收尾",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "省 token：默认每次发言要打两次模型调用（第一轮 send_message，第二轮单独一次 finish 收尾），第二轮带着同样约 17,000 token 的上下文，产出只有一句收尾理由。本插件用代码定死规则——本批工具调用全部是投递类（发消息/表情/戳一戳/图片/语音/音乐）且确实送出了东西时，直接结束本轮，不再打第二次调用。实测 2 轮的会话占 98%、其中约 45% 的第二轮纯属浪费。出现任何查询类工具（看图/搜索/翻记录/翻表情）时本插件不干预，多步任务链完整保留；要分多条说话请用 send_message 的数组参数（本来一轮就能发完）。不想要就在插件页禁用它，或删掉本目录——关掉后行为与没装时完全一致。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "capabilities": ["reply.local-policy"],
+  "requires": [],
+  "settings": {
+    "stopAfterDelivery": true,
+    "onlyIfDelivered": true,
+    "queryGuard": true,
+    "deliveryTools": "",
+    "queryTools": ""
+  },
+  "configSchema": {
+    "stopAfterDelivery": {
+      "type": "boolean",
+      "label": "投递完即收尾（总开关）",
+      "description": "开启时，本批只做了投递就直接结束本轮，省掉一次收尾调用。关掉 = 本插件完全不动手。"
+    },
+    "onlyIfDelivered": {
+      "type": "boolean",
+      "label": "必须确实送出内容",
+      "description": "开启时，只有真正发出了东西（或调用了表情/戳一戳/语音这类纯副作用工具）才收尾。避免工具全部失败、参数为空时被误判成「已交付」。"
+    },
+    "queryGuard": {
+      "type": "boolean",
+      "label": "有查询工具就不干预",
+      "description": "强烈建议保持开启。本批出现任何查询类工具（看图、搜索、翻记录、翻表情、查成员）时不收尾，让模型继续下一步。典型场景：第 1 轮看图、第 2 轮才说话——截断第 2 轮等于看了图却不吭声。"
+    },
+    "deliveryTools": {
+      "type": "string",
+      "label": "额外投递类工具（逗号分隔）",
+      "description": "留空用内置清单。装了新的「发东西」类 Skill 时，把工具名填在这里（例如 my-skill__push），它就会被认作投递类。"
+    },
+    "queryTools": {
+      "type": "string",
+      "label": "强制视为查询类（逗号分隔）",
+      "description": "把某个工具从投递类里摘出来，让它必须走完循环。"
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "id": "image-studio",
+  "name": "图片工坊",
+  "version": "1.3.0",
+  "apiVersion": 1,
+  "category": "media",
+  "entry": "index.js",
+  "description": "搜图（百度 / Bing 免 Key 双源 + Pixiv 插画：中文名自动换日文标签、优先热门、避开最近发过的）、改图（旋转 / 翻转 / 黑白 / 缩放）、发图（没改就发原图，不重编码），还能把选中的图片设成机器人自己的 QQ 头像。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "permissions": ["web_fetch"],
+  "settings": {
+    "requirePreview": true,
+    "maxSendsPerRun": 3,
+    "maxBytesMB": 6,
+    "pixivMaxBytesMB": 20,
+    "allowAvatar": true,
+    "pixivEnabled": true,
+    "pixivApiUrl": "https://api.lolicon.app/setu/v2",
+    "avoidRepeat": true,
+    "repeatWindowDays": 30,
+    "popularFirst": true
+  },
+  "configSchema": {
+    "requirePreview": {
+      "type": "boolean",
+      "label": "发图前先预览",
+      "description": "开启时，处理好的图会先给模型看一眼，确认后才发到聊天里。"
+    },
+    "maxSendsPerRun": {
+      "type": "number",
+      "label": "每次最多发几张",
+      "description": "单次运行内通过图片工坊发图的张数上限，默认 3。"
+    },
+    "maxBytesMB": {
+      "type": "number",
+      "label": "单张图片体积上限（MB）",
+      "description": "普通网图（百度 / Bing）的上限，默认 6。Pixiv 原图用下面单独那一项。"
+    },
+    "pixivMaxBytesMB": {
+      "type": "number",
+      "label": "Pixiv 原图上限（MB）",
+      "description": "Pixiv 原图往往有 10MB+，所以单独给一档，默认 20。超过这个大小会明确报错，不会发半张图。"
+    },
+    "allowAvatar": {
+      "type": "boolean",
+      "label": "允许换头像",
+      "description": "关闭后，图片工坊不会修改机器人自己账号的 QQ 头像。"
+    },
+    "pixivEnabled": {
+      "type": "boolean",
+      "label": "启用 Pixiv 搜图",
+      "description": "开启后，搜图工具可以按 Pixiv 标签搜插画。只取全年龄作品（接口固定 r18=0，本地再按标签复核）。"
+    },
+    "pixivApiUrl": {
+      "type": "string",
+      "label": "Pixiv 检索接口",
+      "description": "默认用公开的懒猫接口 https://api.lolicon.app/setu/v2（大陆可直连、免 Key）。接口挂了可以换成你自己的同结构反代。"
+    },
+    "avoidRepeat": {
+      "type": "boolean",
+      "label": "避免重发同一张",
+      "description": "开启后，发过的图会被记下来，搜索时自动跳过（全局，不分群）。"
+    },
+    "repeatWindowDays": {
+      "type": "number",
+      "label": "去重窗口（天）",
+      "description": "多少天内发过的算重复。默认 30。调太大会导致热门角色搜不到没发过的图。"
+    },
+    "popularFirst": {
+      "type": "boolean",
+      "label": "Pixiv 优先热门",
+      "description": "先搜「标签 1000users入り」，不够再降 500users入り，最后才用普通标签。这是 Pixiv 上的民间约定标签，能明显提高热门作品命中率（但不是精确按收藏数排序）。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "image-studio-note",
+        "title": "图片工坊",
+        "priority": 42,
+        "content": "群友要你搜图、发图，或对网上的图片做旋转 / 翻转 / 转黑白 / 缩放时：先用 image-studio__find_images 搜图，再用 image-studio__edit_image 处理并预览（不带 send），确认效果满意后再带同一个 token 调 send=true 发出去。**没让改就别传旋转/缩放参数**——那样发出去的是原图（不重编码）。群友点名 Pixiv、想二次元插画、或直接说角色名（初音未来、博丽灵梦之类）时，用 find_images 的 source=\"pixiv\"：中文名会自动换成日文标签，不用你翻译；如果你确定日文名，填进 tag 会更快更准。群友要把某张图设成你的 QQ 头像时，先 edit_image 预览，再用 image-studio__set_qq_avatar。链接只能从搜索结果或群友给的消息里取，不要自己编；不要用本机文件路径。"
+      }
+    ]
+  }
+}

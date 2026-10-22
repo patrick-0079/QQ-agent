@@ -1,0 +1,30 @@
+{
+  "id": "owner-console",
+  "name": "主人控制台",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "让**主人自己的 QQ**在私聊里直接指挥机器人：查看/开关任意技能与插件、改这些扩展的设置项、去**别的群**拍人（跨会话戳人）、给某人点赞。所有工具只在「主人的私聊」里生效，群里或别人私聊里一律拒绝——这比把管理口令放进群聊安全得多。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "settings": {
+    "ownerQq": ""
+  },
+  "configSchema": {
+    "ownerQq": {
+      "type": "string",
+      "label": "主人的 QQ 号",
+      "description": "只有这个 QQ 号的私聊里才能使用控制台工具（群里、别人的私聊里一律拒绝）。默认填的是你的大号。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "owner-console-note",
+        "title": "主人控制台",
+        "priority": 60,
+        "content": "在**主人的私聊**里，主人让你查看状态、开关技能/插件、改扩展设置、去别的群拍某人、给某人点赞时，请调用 owner_status / owner_skill / owner_set / owner_poke / owner_like（它们自带身份校验，群里或别人私聊里调用会被拒绝——那种情况如实说明「这个只能在私聊里操作」即可）。owner_poke / owner_like 的 who 可以直接给昵称（工具会去群成员/好友列表里认人），不用先自己查 QQ 号。改完/做完把结果一句话说清，不要长篇复述 JSON。"
+      }
+    ]
+  }
+}

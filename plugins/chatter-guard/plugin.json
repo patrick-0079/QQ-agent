@@ -1,0 +1,70 @@
+{
+  "id": "chatter-guard",
+  "name": "水聊免回",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "entry": "index.js",
+  "description": "连着发表情包、或者一直说水话的时候，机器人就不接了。\n\n【使用者要求】「如果连续对话对方一直在发表情包或者说垃圾话就不用回了」\n\n【为什么要拦在入口】在入站处直接不触发会话 —— **0 token**，连模型都不会被叫醒 ✓\n比「让模型自己判断别回」省得多，也不会偶尔手滑回一句。\n\n【连续几条才免回】默认 **3 条**（可在设置里改）。而且必须是在 **3 分钟**之内连着发的，\n中间插了一句正常话就重新计数 ✓ —— 所以偶尔发个表情包完全不影响正常聊天 ✓\n\n【什么算「水」】\n· **只有表情包 / 图片 / 卡片**，没有一个字\n· **纯水词**：哈哈、嘿嘿、草、6、?、。。。、呃、233、hhh、笑死、绷、牛、秀……\n· **同一个字重复**：哈哈哈哈 ｜ **全是标点**：？？？\n\n⚠️ 特意**没有**用「字数太少就算水」这种规则 —— 那会把「在吗」「谢谢」「几点」一起误伤 ✗\n\n【不拦的】别人、机器人自己的消息、以及**私聊主人**（私聊主人是管理通道，一律放行）✓\n\n【消息不会被扔掉】仍然照常存档、照常标已读，只是**不叫醒模型** ✓",
+  "author": "为 QQ Agent 定制",
+  "enabledByDefault": true,
+  "capabilities": [
+    "chatter-guard.status"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "threshold": 3,
+    "windowSec": 180,
+    "skipMedia": true,
+    "skipFiller": true,
+    "fillerWords": "",
+    "alwaysReplyWhenAtMe": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用（连续水聊就免回）",
+      "description": "总开关。关掉后对方发表情包刷屏它也会一直接。",
+      "group": "开关"
+    },
+    "threshold": {
+      "type": "number",
+      "label": "连着几条就不回",
+      "description": "默认 3。也就是第 3 条起不再接话。设成 1 会变成「只要发表情包就不理」，太容易误伤，不建议。",
+      "group": "判定"
+    },
+    "windowSec": {
+      "type": "number",
+      "label": "多久之内算「连着」",
+      "description": "默认 180（3 分钟）。超过这个间隔就重新计数，所以隔一阵发个表情包不受影响。",
+      "group": "判定"
+    },
+    "skipMedia": {
+      "type": "boolean",
+      "label": "纯表情包/图片算水",
+      "description": "默认开。关掉后只发表情包也会照常接。",
+      "group": "判定"
+    },
+    "skipFiller": {
+      "type": "boolean",
+      "label": "纯水话算水",
+      "description": "默认开：哈哈、草、6、?、。。。、笑死 这类。注意「在吗」「谢谢」**不**算水，不会被误伤。",
+      "group": "判定"
+    },
+    "fillerWords": {
+      "type": "string",
+      "label": "自己补充的水词",
+      "description": "逗号分隔，会加到内置水词表里。误伤了就往这里删／或者直接关掉「纯水话算水」。",
+      "group": "判定"
+    },
+    "alwaysReplyWhenAtMe": {
+      "type": "boolean",
+      "label": "@ 它时仍然回",
+      "description": "默认关。开着的话，哪怕对方在刷表情包，只要 @ 了它就照常接（适合「@ 必须有回应」的场合）。",
+      "group": "判定"
+    }
+  },
+  "_note_tools_is_metadata": "本插件不注册工具，只包 onIncoming。",
+  "tools": []
+}

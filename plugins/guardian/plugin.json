@@ -1,0 +1,95 @@
+{
+  "id": "guardian",
+  "name": "防崩溃和记忆断层",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "author": "QQ Agent + DSH",
+  "description": "机器人\"不在的时候\"造成的一堆麻烦，都在这一个插件里：① **崩溃自愈**：主程序崩了（进程还在但锁没了）→ 自动把它拉起来，并用 QQ 私聊机主报一声（OneBot 是独立进程，主程序挂了它照样能发）；② **记忆断层提醒**：程序关掉/重启期间群里的消息机器人收不到，核心却不感知 → 它会在重启后补一句\"中间断过\"的内部提醒，免得模型接着旧话题答得毫不相干；③ **冒红自救**：进程活着但日志一串 ERROR 也会自动重启一次（20 分钟冷却，不反复动手）。★ **开箱通用**：不写死任何机器路径与私人 QQ 号；通知用的 OneBot 令牌优先取控制台里填的那份，没填就自动从 SnowLuma 的账号配置里挑一份可用的（多账号时不会拿错）。【本次更新 v1.1.0】修掉崩溃通知\"静默发不出去\"：原来控制台里没填 OneBot 令牌就直接放弃；现在会自动从 SnowLuma 的账号配置里挑一份可用的（优先\"文件名里的 QQ == 控制台账号\"，其次最近改动的），真的一份都没有才放弃并**写明日志**。审计确认本插件不写死任何机器路径与私人 QQ 号。",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "permissions": [],
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "enabled": false,
+    "gapEnabled": true,
+    "gapMinutes": 30,
+    "longGapHours": 6,
+    "silentHint": true,
+    "crashGuardEnabled": true,
+    "maxRestarts": 2,
+    "restartWindowHours": 6,
+    "notifyOnRestart": true,
+    "restartOnErrorBurst": true,
+    "errorBurstThreshold": 8
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "group": "总开关",
+      "label": "启用守夜人",
+      "description": "关掉后两件事都停（断层不再提醒，看门狗也会自己退出）。"
+    },
+    "gapEnabled": {
+      "type": "boolean",
+      "group": "记忆断层",
+      "label": "启用记忆断层提醒",
+      "description": "关机/重启后提醒模型「中间的消息你没收到、别接旧话题」。"
+    },
+    "gapMinutes": {
+      "type": "number",
+      "group": "记忆断层",
+      "label": "超过多少分钟算断层",
+      "description": "同一个会话距上次处理超过这个时间就提醒一次，默认 30 分钟。"
+    },
+    "longGapHours": {
+      "type": "number",
+      "group": "记忆断层",
+      "label": "多久算「隔了很久」",
+      "description": "超过这个小时数会用「隔了很久」的说法，默认 6 小时。"
+    },
+    "silentHint": {
+      "type": "boolean",
+      "group": "记忆断层",
+      "label": "要求它别把这件事说出来",
+      "description": "默认开：提示里写明「这是内部提示」，免得群里冒出「我刚重启」这类话。"
+    },
+    "crashGuardEnabled": {
+      "type": "boolean",
+      "group": "崩溃自愈",
+      "label": "启用崩溃自愈",
+      "description": "程序异常退出时由进程外看门狗自动拉起。你自己正常关闭不会被拉起。"
+    },
+    "maxRestarts": {
+      "type": "number",
+      "group": "崩溃自愈",
+      "label": "时间窗内最多自动重启几次",
+      "description": "默认 2 次。避免程序反复崩溃时陷入重启循环、把机器拖死。"
+    },
+    "restartWindowHours": {
+      "type": "number",
+      "group": "崩溃自愈",
+      "label": "重启次数的时间窗（小时）",
+      "description": "默认 6 小时：6 小时内最多重启 maxRestarts 次。"
+    },
+    "notifyOnRestart": {
+      "type": "boolean",
+      "group": "崩溃自愈",
+      "label": "自动重启后 QQ 私聊通知机主",
+      "description": "默认开。会用 OneBot 的 HTTP 接口发给你（程序挂了它照样能发，因为 OneBot 是独立进程）。"
+    },
+    "restartOnErrorBurst": {
+      "type": "boolean",
+      "group": "冒红自救",
+      "label": "日志冒红时自己重启一次",
+      "description": "默认开。进程还活着、但日志里短时间内一串报错（模型接口一直失败、扩展全加载不上）—— 也就是「冒红」，看门狗会自己重启一次并通知你；20 分钟内不重复动手，且受上面重启次数上限约束。"
+    },
+    "errorBurstThreshold": {
+      "type": "number",
+      "group": "冒红自救",
+      "label": "多少条报错算「冒红」",
+      "description": "默认 8：最近 300 行日志里出现这么多条 ERROR 就判定冒红（至少 3）。"
+    }
+  }
+}

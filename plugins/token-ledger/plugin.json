@@ -1,0 +1,72 @@
+{
+  "id": "token-ledger",
+  "name": "Token 账本（谁在烧钱）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "实时查出每个技能/插件/工具花了多少 token。数据全在本地：读 data/sessions 的真实记账 + 每个工具返回内容的体积，算出「工具输出被反复重发」造成的开销，指出最该瘦身的那个工具。每天定时私聊主人一份账本（**零 token**：自己的定时器算完直接发，不经过模型）；群友/主人问一句也能现查。只读，不联网。",
+  "author": "本机定制",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": true,
+  "capabilities": ["status.token-ledger"],
+  "requires": [],
+  "settings": {
+    "windowDays": 3,
+    "maxSessions": 800,
+    "topN": 6,
+    "dailyReport": true,
+    "reportHour": 23,
+    "reportMinute": 50,
+    "graceMinutes": 10,
+    "reportTargets": "",
+    "audit": true
+  },
+  "configSchema": {
+    "windowDays": {
+      "type": "number",
+      "label": "统计最近几天",
+      "description": "默认 3 天。调大会翻更多历史会话文件（目前 2000+ 个、210MB），每次查询会慢一点；日常账看 3~7 天足够。"
+    },
+    "maxSessions": {
+      "type": "number",
+      "label": "最多读几个会话文件",
+      "description": "默认 800 个（按时间从新到旧取）。保护磁盘：会话文件攒到几千个时，全读一遍要好几秒。"
+    },
+    "topN": {
+      "type": "number",
+      "label": "报告里列前几名",
+      "description": "默认 6 名。"
+    },
+    "dailyReport": {
+      "type": "boolean",
+      "label": "每天私聊主人一份账本",
+      "description": "默认打开。每天到点自动私聊你一份（**不花 token**：插件自己算完直接发）。"
+    },
+    "reportHour": {
+      "type": "number",
+      "label": "几点发（小时，0-23）",
+      "description": "默认 23 点。"
+    },
+    "reportMinute": {
+      "type": "number",
+      "label": "几分发（0-59）",
+      "description": "默认 50 分。"
+    },
+    "graceMinutes": {
+      "type": "number",
+      "label": "到点后的补发宽限（分钟）",
+      "description": "电脑休眠/程序没醒着时允许补发；默认 10 分钟。超过就跳过当天（不会半夜的账拖到白天发）。"
+    },
+    "reportTargets": {
+      "type": "string",
+      "label": "账本推给谁（QQ 号）",
+      "description": "多个用英文逗号分隔。留空 = 私聊所有主人（主人识别里配的那些）。"
+    },
+    "audit": {
+      "type": "boolean",
+      "label": "记录运行日志",
+      "description": "默认打开：每次统计/推送都往项目日志里写一行，好排查。"
+    }
+  }
+}

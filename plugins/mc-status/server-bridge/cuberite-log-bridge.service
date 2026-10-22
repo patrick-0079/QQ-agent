@@ -1,0 +1,18 @@
+[Unit]
+Description=mc-log-bridge (read-only Cuberite log HTTP endpoint for QQ-agent)
+After=network-online.target
+
+[Service]
+Type=simple
+# ⚠️ token 不放命令行（ps 能看见），脚本从 /home/lubuntu/mc-log-bridge/token 读
+ExecStart=/usr/bin/python3 /home/lubuntu/mc-log-bridge/mc-log-bridge.py --port 25585 --log /home/lubuntu/cuberite/cuberite.log
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# 小机器上的保险：别让它吃太多内存（只读日志 + 返回几 KB，10MB 绰绰有余）
+MemoryMax=32M
+
+[Install]
+WantedBy=default.target

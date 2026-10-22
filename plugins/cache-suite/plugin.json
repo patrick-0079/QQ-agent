@@ -1,0 +1,409 @@
+{
+  "id": "cache-suite",
+  "name": "Token的最终解",
+  "version": "3.1.0",
+  "description": "Token 的最终解 v3.1：模块改造版 —— 五个模块（缓存钉定器 / 预热闸门修复 / 前缀缓存卫士 / 峰谷切换 / 思考适配）通过\"配置视图 + 存储前缀 + 链式串联\"合并，模块代码不改、键名映射回各自原本的名字；另含省 token 三件套（思考守门 / 往返守门 / 短回执输出上限）与⑨段回填（唯一实测有效的缓存优化）。不注册工具、不导出 promptSections。",
+  "capabilities": [
+    "llm.request-params",
+    "llm.usage",
+    "llm.endpoint-pick",
+    "llm.endpoint-feedback",
+    "llm.response",
+    "llm.retry-advisor",
+    "model.thinking-detect",
+    "status.prewarm-fix"
+  ],
+  "settings": {
+    "warmAtRealCall": true,
+    "skipContinuation": true,
+    "minGapMs": 1500,
+    "minChars": 20000,
+    "maxPerMinute": 40,
+    "warmTimeoutMs": 12000,
+    "mode": "switch",
+    "timezoneOffset": 8,
+    "weekdaysOnly": false,
+    "peakWindows": "09:00-12:00,14:00-18:00",
+    "peakLabel": "Mimo",
+    "peakBaseUrl": "https://api.xiaomimimo.com/v1",
+    "peakApiKey": "",
+    "peakModel": "mimo-v2.6-flash",
+    "peakVisionModel": "mimo-v2.6-flash",
+    "valleyLabel": "Deepseek",
+    "valleyBaseUrl": "https://api.deepseek.com",
+    "valleyApiKey": "",
+    "valleyModel": "deepseek-flash",
+    "valleyVisionModel": "deepseek-flash",
+    "fallbackOnFail": true,
+    "failCooldownMin": 2,
+    "logSwitch": true,
+    "effort": "",
+    "budget": 0,
+    "pin_pinning": true,
+    "pin_pinTarget": "system-tail",
+    "pin_pinPatterns": [
+      "今天的额度还剩\\s*\\d+\\s*张（这个小时还能\\s*\\d+\\s*张）"
+    ],
+    "pin_pinPatternsText": "",
+    "pin_autoPinNumeric": true,
+    "pin_modelSwitchAlert": true,
+    "pin_reportStableDrift": true,
+    "pin_maxPinChars": 2000,
+    "pin_maxLearned": 40,
+    "pin_logThrottleSec": 600,
+    "pin_storageFlushSec": 60,
+    "pin_exposeTool": false,
+    "pg_moveSections": "【群聊语言风格 · 自动学习】",
+    "pg_keepCopyInSystem": false,
+    "pg_logEachMove": true,
+    "pin_enabled": true,
+    "pg_enabled": true,
+    "warm_enabled": true,
+    "switch_enabled": true,
+    "think_enabled": true,
+    "thinkGuard": "auto",
+    "roundHint": "auto",
+    "maxTokensAck": 0,
+    "minWakeChars": 8,
+    "sectionRefill": "on",
+    "refillMaxAddChars": 30000
+  },
+  "configSchema": {
+    "warmAtRealCall": {
+      "type": "boolean",
+      "label": "优化②：等真实调用再决定（不重复预热）",
+      "description": "开启时，编排器第一遍构造请求体时先不动，等内置预热跑完、真实调用要发的那一刻再决定：内置已经写过就不重复补发，被闸门挡住才由本插件补一次。这样每个新前缀恰好预热一次，省掉一次多余的预热请求和约 3 秒等待。默认开启；关掉则改为第一遍构造时就立刻补发。"
+    },
+    "skipContinuation": {
+      "type": "boolean",
+      "label": "优化③：同会话后续轮次不预热",
+      "description": "开启时，只给会话的第一次调用补发预热；同一会话里多轮工具循环产生的后续请求直接跳过（它们本来就有 97%+ 命中，预热的增量真实调用自己也要写一遍，省不下钱还要多等一趟）。默认开启。"
+    },
+    "minGapMs": {
+      "type": "number",
+      "label": "全局最小间隔（毫秒）",
+      "description": "两次补发预热之间的最小间隔，只用于防止瞬时并发堆积。同一前缀本来就会被哈希判重直接跳过，不受这个值影响。默认 1500。"
+    },
+    "minChars": {
+      "type": "number",
+      "label": "最小请求体字符数",
+      "description": "小于这个体积的调用（判定、分类、小请求）不值得预热，直接放过。默认 20000。"
+    },
+    "maxPerMinute": {
+      "type": "number",
+      "label": "每分钟预热上限",
+      "description": "安全阀：单分钟最多补发多少次预热，防止异常情况下请求数失控。默认 40。"
+    },
+    "warmTimeoutMs": {
+      "type": "number",
+      "label": "预热超时（毫秒）",
+      "description": "补发的预热请求自身的超时。超时就放弃，真实调用照常发出。默认 12000。"
+    },
+    "mode": {
+      "type": "enum",
+      "label": "思考模式",
+      "values": [
+        "off",
+        "auto",
+        "on"
+      ],
+      "description": "off=明确关闭（支持的渠道才发关闭参数）；auto=跟随模型/网关默认；on=按渠道发送开启参数。",
+      "default": "switch"
+    },
+    "timezoneOffset": {
+      "type": "number",
+      "label": "时区偏移（小时）",
+      "description": "峰谷时段按哪个时区判。DeepSeek 官方口径是北京时间（UTC+8），所以默认 8。",
+      "default": 8
+    },
+    "weekdaysOnly": {
+      "type": "boolean",
+      "label": "仅工作日算高峰",
+      "description": "开（默认）＝周一至周五才算高峰，周末全天闲时。这是 DeepSeek 官方口径，别随便关。",
+      "default": false
+    },
+    "peakWindows": {
+      "type": "string",
+      "label": "高峰时段（本地时间）",
+      "description": "格式 HH:MM-HH:MM，多个用逗号隔开，支持跨零点（22:00-02:00）。默认 09:00-12:00,14:00-18:00 即 DeepSeek 官方高峰档；写错会自动回落到默认值并在日志里说明。",
+      "default": "09:00-12:00,14:00-18:00"
+    },
+    "peakLabel": {
+      "type": "string",
+      "label": "高峰侧备注名",
+      "description": "只用于日志和状态面板显示，留空则用模型名。例如「中转站」。",
+      "default": "Mimo"
+    },
+    "peakBaseUrl": {
+      "type": "string",
+      "label": "高峰侧 Base URL",
+      "description": "高峰时段发请求的端点，例：https://api.deepseek.com 。留空＝高峰时段不干预，继续用主设置页里配的那个端点。",
+      "default": "https://api.xiaomimimo.com/v1"
+    },
+    "peakApiKey": {
+      "type": "string",
+      "label": "高峰侧 Key",
+      "secret": true,
+      "description": "留空＝沿用主设置页里当前的 Key（两边同一个网关时正合适）。",
+      "default": ""
+    },
+    "peakModel": {
+      "type": "string",
+      "label": "高峰侧模型名",
+      "description": "必须填，且必须是该端点真实存在的模型 id —— 填错会 404，插件会把它当作端点故障降级。",
+      "default": "mimo-v2.6-flash"
+    },
+    "peakVisionModel": {
+      "type": "string",
+      "label": "高峰侧图片专用模型",
+      "description": "高峰时段收到图片/视频时改用它（必须在这个端点上真实存在）。留空＝不干预，沿用核心设置页里的那个全局「图片输入专用模型」——若它不存在于本端点，带图的请求会 404。纯文字请求完全不受这个字段影响。",
+      "default": "mimo-v2.6-flash"
+    },
+    "valleyLabel": {
+      "type": "string",
+      "label": "闲时侧备注名",
+      "description": "同上，只用于显示。例如「DeepSeek 官方半价」。",
+      "default": "Deepseek"
+    },
+    "valleyBaseUrl": {
+      "type": "string",
+      "label": "闲时侧 Base URL",
+      "description": "闲时（非高峰）发请求的端点。留空＝闲时不干预，继续用主设置页里配的那个端点。",
+      "default": "https://api.deepseek.com"
+    },
+    "valleyApiKey": {
+      "type": "string",
+      "label": "闲时侧 Key",
+      "secret": true,
+      "description": "留空＝沿用主设置页里当前的 Key。",
+      "default": ""
+    },
+    "valleyModel": {
+      "type": "string",
+      "label": "闲时侧模型名",
+      "description": "例：deepseek-flash（闲时半价）。必须填，且该端点要真有这个模型。",
+      "default": "deepseek-flash"
+    },
+    "valleyVisionModel": {
+      "type": "string",
+      "label": "闲时侧图片专用模型",
+      "description": "闲时收到图片/视频时改用它。例：deepseek-flash。留空＝不干预（同上，可能 404）。纯文字请求不受影响。",
+      "default": "deepseek-flash"
+    },
+    "fallbackOnFail": {
+      "type": "boolean",
+      "label": "端点故障时临时改走另一侧",
+      "description": "当前侧报错（网络失败 / 401 / 402 / 404 / 429 / 5xx）时，冷却期内改用另一侧；都没配就回退主设置页的端点。关掉＝哪怕端点挂了也严格按时间切。",
+      "default": true
+    },
+    "failCooldownMin": {
+      "type": "number",
+      "label": "故障冷却时长（分钟）",
+      "description": "出错的一侧多久不再接活，到点自动重试。默认 5 分钟。",
+      "default": 2
+    },
+    "logSwitch": {
+      "type": "boolean",
+      "label": "切换时写日志",
+      "description": "只在「真的换了端点」或「带图改了模型」时写一行，日志不进提示词、不花钱。",
+      "default": true
+    },
+    "effort": {
+      "type": "string",
+      "label": "推理强度",
+      "description": "low / medium / high，仅部分渠道生效（OpenAI o 系、OpenRouter）。留空用默认。"
+    },
+    "budget": {
+      "type": "number",
+      "label": "思考预算（token）",
+      "description": "仅支持 budget 的渠道（Claude 兼容、部分网关）生效。0 = 不指定。"
+    },
+    "pin_pinning": {
+      "type": "boolean",
+      "label": "启用搬运（关掉=只观测不改提示）",
+      "description": "关掉后本插件不再改动任何消息，只剩模型横跳与漂移告警 —— 等价于纯观测模式。"
+    },
+    "pin_pinTarget": {
+      "type": "enum",
+      "values": [
+        "system-tail",
+        "user-tail"
+      ],
+      "label": "搬运目的地",
+      "description": "system-tail：把易变片段移到系统提示末尾（改动最小，推荐）。user-tail：移到本次 user 消息末尾，系统提示做到 100% 不动。"
+    },
+    "pin_pinPatterns": {
+      "type": "internal",
+      "label": "内置钉定模式（数组）",
+      "description": "清单默认值，数组形态，不在这里编辑。要追加自定义模式请用下面的『追加钉定模式』。"
+    },
+    "pin_pinPatternsText": {
+      "type": "string",
+      "multiline": true,
+      "label": "追加钉定模式（每行一条正则）",
+      "description": "每行一条 JS 正则，命中即换成占位符并搬到末尾；'#' 开头视为注释。留空=只用内置模式。示例：^\\s*当前时间"
+    },
+    "pin_autoPinNumeric": {
+      "type": "boolean",
+      "label": "数字漂移自学习",
+      "description": "与上一次同会话的稳定区比对，若差异只发生在数字/日期上，就自动学成形状（数字→\\d+）并持久化，之后全部会话自动钉定。不需要事先知道规律。"
+    },
+    "pin_modelSwitchAlert": {
+      "type": "boolean",
+      "label": "模型/上游横跳告警",
+      "description": "缓存按 (模型 × 上游) 隔离，一旦切换该前缀整段重建。本插件无法替你改模型，但会把它变成一条明确的告警日志，不让它静默发生。"
+    },
+    "pin_reportStableDrift": {
+      "type": "boolean",
+      "label": "残余漂移归因",
+      "description": "搬运之后稳定区若仍有差异（钉不住），打出两段原文对比，方便判断要不要加进钉定模式。"
+    },
+    "pin_maxPinChars": {
+      "type": "number",
+      "label": "单段搬运长度上限（字符）",
+      "description": "超过这个长度的命中片段不动它，避免把整段正文搬走。默认 2000。"
+    },
+    "pin_maxLearned": {
+      "type": "number",
+      "label": "自学习形状上限",
+      "description": "防止自学习无限增长。默认 40，超限后不再学新形状。"
+    },
+    "pin_logThrottleSec": {
+      "type": "number",
+      "label": "同类告警节流（秒）",
+      "description": "同一签名的告警在这个时间窗内只打一次，避免刷屏。默认 600。"
+    },
+    "pin_storageFlushSec": {
+      "type": "number",
+      "label": "计数落盘节流（秒）",
+      "description": "写到 data/plugin-data/cache-pin/storage.json 的最小间隔（学到新形状时会立刻落盘）。"
+    },
+    "pin_exposeTool": {
+      "type": "boolean",
+      "label": "注册报表工具",
+      "description": "开启后给模型一个『缓存钉定报表』工具，可以问你搬运了多少片段。默认关闭：注册新工具会改变 tools 数组形状，本身也是一次前缀变化。"
+    },
+    "pg_moveSections": {
+      "type": "string",
+      "label": "要搬出系统提示的段",
+      "multiline": true,
+      "description": "每行一个段标题（从「【」开始）。默认搬「【群聊语言风格 · 自动学习】」——它是实测里唯一会让系统提示每 30 分钟变一次的段。留空 = 不搬。",
+      "default": "【群聊语言风格 · 自动学习】"
+    },
+    "pg_keepCopyInSystem": {
+      "type": "boolean",
+      "label": "系统提示里留一份副本（仅用于对照测试）",
+      "description": "打开后不删原件、只在末尾再贴一份 —— 系统提示仍然会变，缓存不会恢复，只适合做 A/B 对照。正常使用请保持关。",
+      "default": false
+    },
+    "pg_logEachMove": {
+      "type": "boolean",
+      "label": "每次搬移都写日志",
+      "description": "写进应用日志（可查、可用脚本统计）；嫌吵可以关掉，面板里仍然有累计计数。",
+      "default": true
+    },
+    "thinkGuard": {
+      "type": "enum",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动（主动/回执/一句话轮次不思考）"
+        },
+        {
+          "value": "off",
+          "label": "关闭"
+        }
+      ],
+      "label": "⑥ 思考守门（省输出，最大的一块）",
+      "description": "思考是输出 token（4 元/M，是命中输入的 200 倍）。只在「主动搭话 / 纯回执 / 一句话唤醒」这三类轮次摘掉思考参数，其余轮次照常思考。",
+      "default": "auto",
+      "values": [
+        "off",
+        "auto"
+      ]
+    },
+    "roundHint": {
+      "type": "enum",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动（末轮加提示，省一整轮）"
+        },
+        {
+          "value": "off",
+          "label": "关闭"
+        }
+      ],
+      "label": "⑦ 往返守门（省一整轮输入+输出）",
+      "description": "末轮在消息末尾追加一句固定提示，让模型把 send_message 与 finish 放在同一次调用里。代价是尾部多 40 字（本来就要全价），换来少一整个轮次。",
+      "default": "auto",
+      "values": [
+        "off",
+        "auto"
+      ]
+    },
+    "maxTokensAck": {
+      "type": "number",
+      "label": "⑧ 短回执轮次的输出上限（0=关）",
+      "description": "对\"纯回执/主动搭话\"轮次设 max_tokens（如 400），防止写长。0 表示不限制。",
+      "default": 0
+    },
+    "minWakeChars": {
+      "type": "number",
+      "label": "⑧ 判定\"一句话唤醒\"的字数",
+      "description": "唤醒内容去掉消息 id 与括号后 ≤ 这个字数、且不含问号 → 判为一句话唤醒。",
+      "default": 8
+    },
+    "sectionRefill": {
+      "type": "enum",
+      "options": [
+        {
+          "value": "on",
+          "label": "开（推荐，实测有效）"
+        },
+        {
+          "value": "off",
+          "label": "关"
+        }
+      ],
+      "label": "⑨ 段回填（唯一的实测有效缓存优化）",
+      "description": "实测：巨块【角色设定】等会在系统提示里\"时有时无\"，它一消失就从第 4265 字起整段作废（85% 的 miss）。开着时按上一轮的段顺序重建系统提示，缺的段用上一轮原文补回（同一份文本，走命中价）。全量 120 轮干净 A/B：miss% 12.8 → 9.1。",
+      "default": "on",
+      "values": [
+        "on",
+        "off"
+      ]
+    },
+    "refillMaxAddChars": {
+      "type": "number",
+      "label": "⑨ 单轮净增上限（字符）",
+      "description": "默认 30000。超过就不补。",
+      "default": 30000
+    },
+    "warm_enabled": {
+      "type": "boolean",
+      "label": "预热闸门",
+      "description": "启动/切换时预热缓存（warm_enabled）。"
+    },
+    "switch_enabled": {
+      "type": "boolean",
+      "label": "峰谷切换",
+      "description": "按高峰/闲时切换端点（switch_enabled）。"
+    },
+    "think_enabled": {
+      "type": "boolean",
+      "label": "思考适配",
+      "description": "推理内容/思考参数适配（think_enabled）。"
+    },
+    "pin_enabled": {
+      "type": "boolean",
+      "label": "缓存钉定器",
+      "description": "固定缓存前缀（pin_enabled）。"
+    },
+    "pg_enabled": {
+      "type": "boolean",
+      "label": "前缀缓存卫士",
+      "description": "整理/移动提示词段落（pg_enabled）。"
+    }
+  }
+}

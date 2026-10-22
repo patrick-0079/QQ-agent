@@ -1,0 +1,31 @@
+{
+  "id": "search-guard",
+  "name": "搜索次数护栏",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "限制单次对话里的联网搜索次数：到设定上限后直接拦截 web_search/web_fetch 的执行，模型只能基于已搜到的信息直接回答。",
+  "author": "本地自建",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "maxSearches": 3,
+    "alsoBlockFetch": true
+  },
+  "configSchema": {
+    "maxSearches": {
+      "type": "number",
+      "label": "单次对话最多搜索次数",
+      "description": "同一个用户消息触发后，最多允许 web_search 调几次。到次数后直接拦截。默认 3 次。填 0 = 不限制。"
+    },
+    "alsoBlockFetch": {
+      "type": "boolean",
+      "label": "同时拦截 web_fetch",
+      "description": "到上限后连网页抓取也一起禁用。默认开。"
+    }
+  },
+  "prompt": null
+}

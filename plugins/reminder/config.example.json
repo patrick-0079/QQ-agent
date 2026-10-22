@@ -1,0 +1,13 @@
+{
+  "skills": {
+    "reminder": {
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "scanIntervalSec": 60,
+        "maxActive": 50,
+        "keepAfterDoneDays": 1
+      }
+    }
+  }
+}

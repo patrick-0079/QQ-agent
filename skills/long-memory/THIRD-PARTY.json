@@ -1,0 +1,14 @@
+{
+  "name": "sql.js",
+  "version": "1.13.0",
+  "license": "MIT",
+  "source": "https://registry.npmjs.org/sql.js/-/sql.js-1.13.0.tgz",
+  "package_sha256": "6d70e68446df85ac8f56e34dd10986cfe1182335cb0f071b71b3f007bc33394a",
+  "files": {
+    "vendor/sql-wasm.cjs": "694ca5b36aa3e6e71f417819d7df390b65343665fcfa5c69015ca33d93d291b3",
+    "vendor/sql-wasm.wasm": "0734155c83e493983d1f2ff5b09a4fab6e35a32e9449c7e4e545756439f62d73",
+    "vendor/LICENSE.sql.js": "60a3f6e4d7b29b4321359e683b36cf198d24f58e24582070f56e6fa89d5ee2be"
+  },
+  "modification": "dist/sql-wasm.js renamed to vendor/sql-wasm.cjs; bytes unchanged",
+  "no_runtime_downloads": true
+}

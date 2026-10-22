@@ -1,0 +1,154 @@
+{
+  "id": "share-card",
+  "name": "分享卡片解读",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "B站视频、抖音视频、米游社帖子、贴吧帖子、QQ频道帖子、腾讯视频、塔吉多（完美世界社区）、库街区、森空岛、快手、小红书，以及 QQ 好友推送的卡片/链接，机器人会自动打开网页读出标题与正文，并在回复时知道你在分享什么。读不到正文的平台会如实说明原因并退回卡片自带的信息，不会编造内容。同时处理加好友、加群邀请（可选自动同意）。",
+  "author": "QQ Agent User",
+  "enabledByDefault": true,
+  "capabilities": [
+    "friend.request",
+    "group.request",
+    "share-card.status"
+  ],
+  "requires": [],
+  "permissions": [
+    "web_fetch"
+  ],
+  "settings": {
+    "readCards": true,
+    "readLinks": true,
+    "injectIntoPrompt": true,
+    "maxLinksPerTurn": 3,
+    "maxChars": 700,
+    "timeoutMs": 12000,
+    "reuseMediaCookies": true,
+    "bilibiliCookie": "",
+    "douyinCookie": "",
+    "tiebaCookie": "",
+    "autoOcr": false,
+    "ocrTimeoutMs": 25000,
+    "ocrRetries": 2,
+    "autoApproveFriend": false,
+    "autoApproveGroup": false,
+    "allowList": "",
+    "denyList": "",
+    "notifyOwner": true,
+    "ownerIds": "",
+    "notifyText": "有新好友/入群请求：{name}({id})，类型：{kind}，验证信息：{comment}。当前策略：{action}"
+  },
+  "configSchema": {
+    "readCards": {
+      "type": "boolean",
+      "label": "解读分享卡片",
+      "description": "群里有人转发 B站/抖音/米游社/贴吧/QQ频道/腾讯视频/塔吉多/快手/小红书/库街区/森空岛/小程序的卡片时，自动打开里面的链接读标题与正文。关掉后卡片仍然能被读到「标题+链接」。"
+    },
+    "readLinks": {
+      "type": "boolean",
+      "label": "解读普通链接",
+      "description": "卡片之外，消息里直接贴的分享链接也一并解读。"
+    },
+    "injectIntoPrompt": {
+      "type": "boolean",
+      "label": "自动写进上下文",
+      "description": "开启后本轮消息里的分享内容会自动附在提示词里，机器人不用调用工具就知道你在分享什么。关掉则只保留按需调用的 read_share 工具。"
+    },
+    "maxLinksPerTurn": {
+      "type": "number",
+      "label": "每轮最多解读几条",
+      "description": "防止一条消息里塞了一堆链接把时间拖长，默认 3。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "每条正文最多字数",
+      "description": "正文摘要的截断长度，默认 700 字。"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "抓取超时（毫秒）",
+      "description": "单个链接的读取超时，默认 12000 毫秒。"
+    },
+    "reuseMediaCookies": {
+      "type": "boolean",
+      "label": "复用「B站/抖音视频下载」里的 Cookie",
+      "description": "开启后直接用 media-download 技能里已填的 B站 SESSDATA / 抖音 sessionid，不用在这里再贴一遍。默认开启。"
+    },
+    "bilibiliCookie": {
+      "type": "string",
+      "label": "B站 Cookie（可留空）",
+      "description": "只在需要读「登录可见」的 B站内容时才有用。留空则用 media-download 里那份。"
+    },
+    "douyinCookie": {
+      "type": "string",
+      "label": "抖音 Cookie / sessionid（可留空）",
+      "description": "抖音分享页对未登录访问基本不给数据，带上网页版 sessionid 才能读到标题作者。留空则用 media-download 里那份。"
+    },
+    "tiebaCookie": {
+      "type": "string",
+      "label": "贴吧 Cookie / BDUSS（可留空）",
+      "description": "贴吧对陌生 IP 整站返回「百度安全验证」，带上登录后的 Cookie（如 BDUSS=…）才有可能读到帖子正文。留空则贴吧只会报「被反爬拦截」。"
+    },
+    "autoOcr": {
+      "type": "boolean",
+      "label": "自动识别图片文字（默认关）",
+      "description": "开启后本轮消息里的图片会被自动识别，把文字附在上下文里。默认关闭：群里图片太多，全自动识别又慢又吵。关着也能用「读图片文字」工具按需识别。"
+    },
+    "ocrTimeoutMs": {
+      "type": "number",
+      "label": "识图超时（毫秒）",
+      "description": "单张图片的识别超时，默认 25000 毫秒。"
+    },
+    "ocrRetries": {
+      "type": "number",
+      "label": "识图重试次数",
+      "description": "协议端的识别服务经常回「服务忙」，这里控制重试几次，默认 2。"
+    },
+    "autoApproveFriend": {
+      "type": "boolean",
+      "label": "自动同意好友请求",
+      "description": "开启后有人加机器人好友会自动同意。默认关闭——开着等于任何人都能加上它。"
+    },
+    "autoApproveGroup": {
+      "type": "boolean",
+      "label": "自动同意入群邀请",
+      "description": "开启后别人邀请机器人进群会自动同意。默认关闭。"
+    },
+    "allowList": {
+      "type": "string",
+      "label": "白名单 QQ 号",
+      "description": "只自动同意这些 QQ 号的请求，逗号或换行分隔。留空表示不限制。白名单命中时即使用户总开关是关的也按白名单放行吗——不会，仍然需要打开上面的自动同意。"
+    },
+    "denyList": {
+      "type": "string",
+      "label": "黑名单 QQ 号",
+      "description": "永远不自动同意这些 QQ 号，优先级高于白名单。逗号或换行分隔。"
+    },
+    "notifyOwner": {
+      "type": "boolean",
+      "label": "通知主人",
+      "description": "收到好友/入群请求时私聊告知主人（不论同意还是拒绝）。"
+    },
+    "ownerIds": {
+      "type": "string",
+      "label": "主人 QQ 号",
+      "description": "接收通知的主人 QQ 号（必填），多个用逗号分隔。",
+      "required": true
+    },
+    "notifyText": {
+      "type": "string",
+      "label": "通知文案模板",
+      "description": "可用变量：{name} 昵称、{id} QQ号、{kind} 请求类型、{comment} 验证信息、{action} 处理结果。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "share-card-note",
+        "title": "分享链接与卡片",
+        "priority": 36,
+        "content": "群友转发的分享卡片（B站、抖音、米游社、贴吧、QQ频道、腾讯视频、塔吉多、快手、小红书、库街区、森空岛、音乐、小程序等）和分享链接，上下文里会带形如【分享解读】的段落，里面是标题、作者和正文摘要——那是真的读过的内容，可以直接据此讨论，不要再说「我打不开链接」。如果某条分享没有自动解读（比如被截断或解析失败），可以调用 share-card__read_share 传入链接或消息前的 #编号 现场读取。别人发链接多半是想让你一起看，回复时给出具体反应或观点，不要只复述标题。注意：快手、小红书、库街区、森空岛这几家未登录读不到正文，这时上下文里给的是【分享卡片】段落——里面只有卡片自带的标题/来源，够用来接话，但**不要声称看过正文，也不要编造里面的内容**。别人发来截图、公告图、聊天记录截图时，如果上下文里没有【图片文字】段落而你又确实需要知道图上的字，调用 share-card__read_image_text（不传参数即取本会话最近一张图）把文字读出来；识图依赖协议端服务，失败就如实说没看清，不要瞎猜图上的内容。"
+      }
+    ]
+  }
+}

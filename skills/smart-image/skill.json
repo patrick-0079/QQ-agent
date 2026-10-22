@@ -1,0 +1,73 @@
+{
+  "id": "smart-image",
+  "name": "智能配图",
+  "version": "2.1.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "被 @ 时机器人自己判断要不要配图；该配就按关键词找一张图发出来。动漫/游戏相关的关键词优先从 pixiv 出原图，其它关键词走多图源图搜；按实测分辨率优先高清、同一关键词每次换不同的图，任何关键词都能出图。免 Key、免配置。",
+  "enabledByDefault": true,
+  "permissions": ["web_fetch"],
+  "settings": {
+    "count": 1,
+    "maxCount": 3,
+    "source": "auto",
+    "minShortSide": 480,
+    "poolSize": 40,
+    "allowRandom": true,
+    "pixiv": "prefer",
+    "pixivExcludeAI": false
+  },
+  "configSchema": {
+    "count": {
+      "type": "number",
+      "label": "默认发送张数",
+      "description": "机器人没特别指定时发几张，1~3，默认 1。"
+    },
+    "maxCount": {
+      "type": "number",
+      "label": "一次最多几张",
+      "description": "上限保护，防止刷屏。1~3，默认 3。"
+    },
+    "source": {
+      "type": "string",
+      "label": "图源（仅普通图搜）",
+      "description": "auto（推荐）= 360 图搜为主、百度补充、必应兜底，逐个自动切换；也可锁定单一源：360 / baidu / bing。这里只管普通图搜，pixiv 由下面单独控制。"
+    },
+    "pixiv": {
+      "type": "enum",
+      "label": "pixiv 图源（ACG 专用）",
+      "description": "动漫/游戏/角色相关的关键词优先从 pixiv 取图（长边 1200px）—— 这类题材本来就在 pixiv 上。prefer（默认）= 优先 pixiv，那边没有就自动回到普通图搜；fallback = 先用普通图搜，实在没图才用 pixiv；off = 不用。非 ACG 关键词会自己跳过 pixiv，与这里无关。",
+      "values": ["prefer", "fallback", "off"]
+    },
+    "pixivExcludeAI": {
+      "type": "boolean",
+      "label": "排除 AI 生成的作品",
+      "description": "开着就只挑人类画师的作品；关着（默认）AI 图和手绘一起参与挑选。"
+    },
+    "minShortSide": {
+      "type": "number",
+      "label": "清晰度下限（短边像素）",
+      "description": "优先挑短边不小于该值的图（默认 480，约等于 720P 观感）。搜不到更大的时会自动放宽，不会因此发不出图；填 0 = 不限制。"
+    },
+    "poolSize": {
+      "type": "number",
+      "label": "备选池大小",
+      "description": "每次在这个关键词分辨率最高的 N 张里随机挑一张（默认 40）。这个值就是“每次不重样”的调节钮：调大更容易换新图，调小更偏向最热门的那几张。"
+    },
+    "allowRandom": {
+      "type": "boolean",
+      "label": "实在找不到时发随机图",
+      "description": "开着（默认）：所有图源都没结果时补一张与关键词无关的随机图，保证不会“空手而归”。关掉则宁可什么都不发。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "smart-image-judge",
+        "title": "智能配图（先判断要不要图，要就一定要发出去）",
+        "priority": 42,
+        "content": "被 @ 或被叫到时，先判断对方是不是想要一张图：语气像是在要图、要配图、想看某样东西长什么样（例如“来张猫图”“有图吗”“搜张向日葵”“长啥样发一个”“整个表情包”），就调用 smart-image__find_image，关键词从对方原话里提炼，越具体越准；如果只是在聊天、提问、吐槽、发表情，就不要调用 —— 不要为了凑热闹乱发图。\n\n关键词处理是硬要求：不管对方说的事物你熟不熟悉、听没听过、是不是真实存在的东西，都要照原话提炼出关键词把 smart-image__find_image 调下去，由工具负责找到图。**绝对不要回复“我不认识”“我不知道这是什么”“没有这个的图”“帮不了你”这类话**——工具内部有多图源和兜底图源，任何关键词都能出图，你只需要把词交出去。不要因为自己不认识就改用同义词、也不要叫对方换个说法。\n\n同一次回应最多调用 1~2 次；已经发过图就别重复发。图发出去后，不要在回复里描述或复述图片内容，一两句话带过即可。"
+      }
+    ]
+  }
+}

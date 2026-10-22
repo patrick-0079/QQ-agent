@@ -1,0 +1,20 @@
+{
+  "id": "recall",
+  "name": "撤回消息",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "让机器人能撤回自己刚发错的消息（说错话、发错图、复读了一遍），也能按主人的要求撤回别人的消息。用的是协议端的 delete_msg 接口。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "prompt": {
+    "sections": [
+      {
+        "id": "recall-note",
+        "title": "撤回",
+        "priority": 58,
+        "content": "撤回用 recall_my_last（撤自己刚发的，可指定条数）或 recall_message（按消息号/内容片段撤）。触发场景：群友说「撤回」「说错了」「你刚才那条撤了」、你自己发现发错了（复读、发错图、报错内容漏出来）。撤**自己**发的：谁要求都行。撤**别人**发的：只能在主人的私聊里做，群里一律拒绝（工具自己会校验，被拒就如实说明「撤别人的消息只能在私聊里让我做」）。撤完只说一句「撤了」就行，别解释工具细节。"
+      }
+    ]
+  }
+}

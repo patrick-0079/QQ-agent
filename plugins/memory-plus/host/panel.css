@@ -1,0 +1,197 @@
+/* 记忆与存档优化 · 面板样式
+ *
+ * 原则：**能复用核心类名就复用**（.btn / .badge / .inp / .collapsible.mem-fold /
+ * .mem-who / .mem-actions / .coll-body / .muted / .detail-header / .chat-item），
+ * 这里只补核心没有的那几样（右侧状态区、进度条、记忆行、日期下拉）。
+ *
+ * 颜色一律用核心的设计 token —— 尤其是文字色必须用 var(--tx)/var(--tx2)：
+ *   v1 用的是不存在的 --fg 兜底色（近白），亮色主题下文字直接看不见。
+ *   --tx / --tx2 / --tx3 是两套主题都会自动切换的那三个。
+ */
+
+/* ── 记忆列表项上的小角标（短期 N · 标签 N · 待裁决 N）── */
+.mp-badge {
+  color: var(--tx3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ── 详情头部：左边内容 + 右边常驻状态区 ── */
+.mp-hd {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.mp-hd-main {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.mp-side {
+  flex: 0 0 330px;
+  max-width: 100%;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  background: var(--bg1);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.mp-side-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mp-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--tx);
+  line-height: 1.5;
+  word-break: break-word;
+}
+.mp-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tx3);
+  box-shadow: 0 0 0 3px transparent;
+}
+.mp-dot-ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.mp-dot-err { background: var(--err); box-shadow: 0 0 0 3px var(--err-soft); }
+.mp-dot-run { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); animation: mp-pulse 1.2s ease-in-out infinite; }
+.mp-dot-queue { background: var(--ac); box-shadow: 0 0 0 3px var(--ac-soft); animation: mp-pulse 1.6s ease-in-out infinite; }
+@keyframes mp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
+}
+
+.mp-progress {
+  height: 4px;
+  margin: 7px 0 8px;
+  border-radius: 3px;
+  background: var(--bd);
+  overflow: hidden;
+}
+.mp-progress > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: var(--tx3);
+  transition: width .3s ease;
+}
+.mp-progress > i.on { background: var(--ac); }
+
+.mp-side-model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mp-sel {
+  flex: 1 1 90px;
+  min-width: 0;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+.mp-side-hint {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.mp-side-fail { margin-top: 5px; font-size: 11px; }
+.mp-fail > summary { cursor: pointer; color: var(--warn); }
+.mp-fail-item {
+  color: var(--tx2);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* ── 详情里的小结构 ── */
+.mp-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 0;
+}
+.mp-row-k {
+  color: var(--tx3);
+  font-size: 12px;
+  min-width: 32px;
+}
+.mp-sec {
+  color: var(--tx2);
+  font-size: 12px;
+  margin: 8px 0 2px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--bd);
+}
+.mp-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 2px 0;
+  font-size: 13px;
+  color: var(--tx);
+}
+.mp-line-t {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+  line-height: 1.55;
+}
+.mp-line-a {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+.mp-edit-ta {
+  flex: 1 1 auto;
+  min-height: 52px;
+  width: 100%;
+  resize: vertical;
+}
+
+/* 标签 */
+.mp-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.mp-tags .badge { gap: 4px; }
+.mp-x {
+  cursor: pointer;
+  opacity: .65;
+  padding: 0 1px;
+}
+.mp-x:hover { opacity: 1; color: var(--err); }
+.mp-tag-in { width: 84px; }
+
+/* 手工记一条 */
+.mp-add-row { margin-top: 6px; }
+.mp-add-in { flex: 1 1 240px; min-width: 160px; }
+.mp-add-kind { flex: 0 0 auto; }
+
+/* 存档区 */
+.mp-date { width: auto; padding: 2px 4px; }
+.mp-backups { margin-top: 4px; }
+.mp-q {
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--bd);
+  font-size: 13px;
+}
+.mp-q:last-child { border-bottom: 0; }
+.mp-q-in { flex: 1 1 220px; }
+
+/* 窄窗口下状态区落到下面、按钮行折行 */
+@media (max-width: 1080px) {
+  .mp-side { flex: 1 1 100%; }
+}
+@media (max-width: 880px) {
+  .mp-line { flex-wrap: wrap; }
+  .mp-line-a { width: 100%; justify-content: flex-end; }
+}

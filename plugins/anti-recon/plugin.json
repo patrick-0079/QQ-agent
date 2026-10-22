@@ -1,0 +1,29 @@
+{
+  "id": "anti-recon",
+  "name": "反侦察（身份防套话）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "确定性拦截会暴露「机器人身份 / 专属关系 / 制作者」的发言。不依赖模型自觉：模型真要发出去时，这里直接否决这次 send_message。设计依据是 50 条对抗探针的实测数据——只拦【真泄露】（承认是AI、声称专属关系、给出制作者信息、群聊里用「主人」），不拦【否认里出现的敏感词】（「什么主人 我又不是狗」这种好回复必须放行）。",
+  "author": "部署侧",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "logOnly": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用反侦察拦截",
+      "description": "关掉后不做任何拦截（提示词里的人设规则仍然生效）。"
+    },
+    "logOnly": {
+      "type": "boolean",
+      "label": "只记录不拦截（试运行）",
+      "description": "打开后只往日志写「本来会拦下哪句」，不真的阻止发送——想先观察它什么时候会触发、会不会误伤，用这个。"
+    }
+  }
+}

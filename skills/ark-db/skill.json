@@ -1,0 +1,63 @@
+{
+  "id": "ark-db",
+  "name": "明日方舟数据库（PRTS 实时）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "description": "接 prts.wiki 实时查明日方舟数据：干员面板（星级/职业·分支/阵营/特性/天赋/技能/精英化材料/潜能）、外号与黑话（老板=银灰、42=史尔特尔、充电宝/逃课…）、全站搜索、任意页面摘要（活动/关卡/材料/剧情）。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "permissions": [
+    "web_fetch"
+  ],
+  "settings": {
+    "enabled": true,
+    "timeoutMs": 15000,
+    "minGapMs": 900,
+    "maxCardChars": 1500,
+    "pageChars": 800,
+    "autoIndexDays": 7
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用明日方舟数据库",
+      "description": "关掉后五个 ark 工具全部失效。"
+    },
+    "minGapMs": {
+      "type": "number",
+      "label": "请求最小间隔（毫秒）",
+      "description": "对 prts.wiki 的礼貌间隔，默认 900。别调太低。"
+    },
+    "maxCardChars": {
+      "type": "number",
+      "label": "干员卡最大长度",
+      "description": "返回给模型的干员信息上限，默认 1500 字符。"
+    },
+    "pageChars": {
+      "type": "number",
+      "label": "页面摘要默认长度",
+      "description": "ark_page 不指定字数时的默认值，默认 800。"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "请求超时（毫秒）",
+      "description": "单次 PRTS 请求超时，默认 15000。"
+    },
+    "autoIndexDays": {
+      "type": "number",
+      "label": "自动索引天数",
+      "description": "启动后自动补索引最近几天的数据，默认 7。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "ark-db-playbook",
+        "title": "明日方舟数据（查得到才说，别编）",
+        "priority": 34,
+        "content": "你有一套连 prts.wiki（PRTS，明日方舟中文 wiki）的查询工具：\n- `ark-db__ark_nick`（query）：外号/黑话 → 干员或词条（老板→银灰、42→史尔特尔、小羊→艾雅法拉、塞爹→塞雷娅；充电宝/逃课/七星干员→PRTS 黑话词条）。本地库、零延迟。\n- `ark-db__ark_operator`（name）：干员卡——星级、职业·分支、阵营、标签、特性、部署费用/阻挡、面板、天赋、技能、精英化材料、潜能。外号也能直接查。\n- `ark-db__ark_search`（query, limit）：全站搜索页面标题（活动、关卡、材料、模组、黑话）。\n- `ark-db__ark_page`（title, chars）：读任意页面正文摘要，用于活动机制、关卡配置、材料用途、剧情梗。\n- `ark-db__ark_sync`（force）：重建干员/黑话索引（平时自动更新，新干员查不到时才调）。\n\n什么时候用：群里问某个干员强不强/技能是什么/要什么材料、问某关怎么打、问活动机制、问「充电宝」「逃课」这类黑话，而你不确定时 → 先查再说。\n\n**听到不认识的叫法，先查外号库**：群友很少叫全名，多用外号（老板、42、小羊、塞爹）或者黑话。看到对不上号的称呼 → 先 `ark_nick`；查到了顺着接一句，别背资料；查不到再 `ark_search`，还是没有就直说没查到——**宁可问一句「这个指谁」，也别装懂编一个**。\n\n规矩（重要）：\n1) 只用查回来的内容回答，别凭印象编数值、别编材料数量；查不到就直说「PRTS 上没查到这个」。\n2) 回答要短：面板挑 3~5 个关键项（星级、职业·分支、核心技能、精英化材料），别把整张卡念一遍。\n3) 说到数据时带上来源一句「（PRTS）」；对方要细节再给链接 https://prts.wiki/w/页面名。\n4) 一次最多查 2 个页面；同一个问题不要反复查。\n5) 跟明日方舟无关的话题不要主动查，也别为了显得知道就去搜。"
+      }
+    ]
+  }
+}

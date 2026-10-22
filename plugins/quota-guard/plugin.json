@@ -1,0 +1,56 @@
+{
+  "id": "quota-guard",
+  "name": "Token 配额守卫",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "enabledByDefault": false,
+  "category": "message",
+  "description": "按 QQ 号累计每天消耗的 token，超额度的人的消息不进提示词；整批都超额时直接不调用模型（零消耗）。纯本地计算，自身不花任何 token。",
+  "author": "canifish",
+  "capabilities": [
+    "chat.quota-gate"
+  ],
+  "requires": [],
+  "permissions": [
+    "web_fetch"
+  ],
+  "settings": {
+    "resetHour": 4,
+    "defaultDailyLimit": 0,
+    "perUser": {},
+    "notifyOnBlock": false,
+    "notifyText": "（今天的额度用完啦，明天再来找我吧）",
+    "blockWhenSendLimited": true
+  },
+  "configSchema": {
+    "resetHour": {
+      "type": "number",
+      "label": "每日重置时间（0-23 点）",
+      "hint": "额度周期 = 该时刻到次日该时刻。例：填 4 = 每天凌晨 4 点刷新"
+    },
+    "defaultDailyLimit": {
+      "type": "number",
+      "label": "默认每日额度（token，0 = 不限）",
+      "hint": "没有单独设置额度的人用这个值"
+    },
+    "notifyOnBlock": {
+      "type": "boolean",
+      "label": "拦下后回一句提示"
+    },
+    "notifyText": {
+      "type": "string",
+      "label": "提示文本",
+      "hint": "仅在开启上一条时使用；它由核心的发送队列发出，不调用模型"
+    },
+    "blockWhenSendLimited": {
+      "type": "boolean",
+      "label": "发送限流前置",
+      "hint": "分钟/小时发送额度用尽时，在请求模型之前就结束这一轮（否则 token 白花）"
+    },
+    "perUser": {
+      "type": "internal",
+      "label": "按人额度（内部）",
+      "description": "按 QQ 单独设置的额度，由专用界面维护。"
+    }
+  }
+}

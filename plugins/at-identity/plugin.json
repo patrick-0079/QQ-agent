@@ -1,0 +1,37 @@
+{
+  "id": "at-identity",
+  "name": "@ 身份锚点（分清 @ 的是谁）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "description": "修「群里一出现 @ 她就以为在叫自己」的 bug。做两件事：①把消息正文里的 @段 从裸 @昵称 渲染成 @昵称(QQ:号)，与发言人格式对齐，模型按 QQ 号认人（宿主在 onebot.js 预留的 message.inline-at-normalize 能力原本无人提供）；②群聊时往系统提示末尾注入一小段身份锚点：你的 QQ 号是多少、判断谁在叫你只认 QQ 号。机器人 QQ 号自动从本机控制台接口探测，也可在设置里手动填。",
+  "author": "本机定制",
+  "permissions": ["web_fetch"],
+  "capabilities": ["message.inline-at-normalize"],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "selfId": "",
+    "verbose": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用 @ 身份锚点",
+      "description": "总开关。关掉后 @段 不再补 QQ 号、系统提示也不再注入身份锚点，行为与没装本插件一样。"
+    },
+    "selfId": {
+      "type": "string",
+      "label": "机器人 QQ 号（留空自动探测）",
+      "description": "正常留空：插件每 5 分钟从本机控制台接口自动取当前登录的 QQ 号。自动探测失败（如改过端口且未登录）时在这里填纯数字 QQ 号兜底。"
+    },
+    "verbose": {
+      "type": "boolean",
+      "label": "输出诊断日志",
+      "description": "开启后在控制台打印是否成功取到 QQ 号、每轮是否注入了身份锚点，便于排查。"
+    }
+  },
+  "prompt": null
+}

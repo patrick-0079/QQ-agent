@@ -1,0 +1,107 @@
+{
+  "id": "ai-status",
+  "name": "AI状态查询",
+  "version": "1.6.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "查询机器人当前状态并发送一张状态面板图：模型与渠道显示中文品牌名（deepseek-v4-pro → 深度思索 v4-pro 等，映射表内置主流厂商可随时补充）、今日 token 用量与缓存命中率、今日花费、今日会话、运行时长、DeepSeek 峰谷时段与转档倒计时、日志告警、最近节日倒计时、系统资源（进程内存/堆、系统内存余量、CPU 占用，超阈值时给出重启建议）、插件状态（其他插件通过 status.<插件id> 能力上报自己的运行状态，自动聚合显示）、亮暗配色切换（theme 设置项）。图片由工具直接发出（渲染失败自动回退文字卡）。另对外开放 cost.display-override 能力：别的插件可以只改「今日花费」的**显示文案**（真实计费与预算统计不受影响）。用法：发「状态」「AI 状态」「用量」「花费」，或直接 @机器人 问一句即可。",
+  "author": "QQ Agent",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": true,
+  "capabilities": [],
+  "settings": {
+    "theme": "dark",
+    "sensitiveAdminOnly": true,
+    "adminOnly": "system,plugins,tips,pid"
+  },
+  "configSchema": {
+    "theme": {
+      "type": "enum",
+      "values": [
+        "dark",
+        "light"
+      ],
+      "label": "面板配色",
+      "description": "状态面板图的配色：dark 深色（默认）/ light 浅色。改完下一条状态查询即生效。",
+      "group": "面板显示"
+    },
+    "sensitiveAdminOnly": {
+      "type": "boolean",
+      "label": "门禁总开关",
+      "description": "总开关：开=下方清单生效；关=所有状态对所有人公开。没配置主人名单（owner-identity）时门禁不生效。",
+      "group": "敏感信息门禁"
+    },
+    "adminOnly": {
+      "type": "string",
+      "label": "仅管理员可见的状态项",
+      "description": "逗号分隔的键名列表（支持中文）。可用键：model 当前模型、vendor 渠道、system 系统资源、plugins 插件状态、tips 健康提示、pid 进程号、cost 花费、usage 用量、peak 峰谷、rate 限速、logs 日志、budget 预算、holiday 节日、runtime 运行时长；也可点名单个插件：plugins.插件id。清空 = 全部公开。默认 system,plugins,tips,pid。",
+      "group": "敏感信息门禁"
+    }
+  },
+  "prompt": {
+    "when": "当用户发送以反斜杠开头的指令时——「\\状态」「\\AI状态」「\\用量」「\\花费」「\\模型」「\\峰谷」「\\运行时长」「\\内存」「\\CPU」「\\日志」「\\告警」「\\节日」，用来查机器人的运行状态、模型、token 消耗、花费、峰谷时段、运行时长、节日倒计时、内存/CPU 占用。\n⚠️ **没有反斜杠就不响应**：用户只是聊天时提到「状态」「花了多少钱」「内存」这类词，**不要**调用本工具 —— 那是普通闲聊，不是指令。只有消息里出现反斜杠 + 指令词才算。\n⚠️ 以 / 开头的斜杠指令（「/状态」「/status」）是**其他机器人**的命令，也不要响应。",
+    "examples": [
+      "\\状态",
+      "\\AI状态",
+      "\\用量",
+      "\\花费",
+      "\\峰谷",
+      "\\内存",
+      "\\节日"
+    ],
+    "instruction": "调用 get_ai_status 工具即可 —— 状态面板图由工具**直接发送到当前会话**，不需要（也不要）再调用 send_message 转发或复述面板内容。**无论提问的是管理员还是普通群友，都直接调用本工具**：权限过滤在工具内部自动完成，普通用户会收到精简面板，你不需要判断对方身份，更不许以权限不足为由拒绝调用或拒绝回答。**但用户消息以 / 开头的斜杠指令（/状态、/help 等）是群里其他机器人的命令，不要调用本工具也不要回应**——本机器人的状态指令是「\\状态」（反斜杠）。工具返回的 content 里有几个关键数字，最多用一句简短自然的话带过即可。用户明确要文字版时可传 format:\"text\"，此时返回 6 行文字卡，必须原样整条发送（messages 传单个字符串，严禁拆分或改写）。\n⚠️ 本工具**只有用户发了以反斜杠开头的指令才会出现**（如 「\\状态」、「\\AI状态」、「\\用量」）。既然你现在能看到这个工具，说明用户确实发了指令，照做即可。"
+  },
+  "tools": [
+    {
+      "id": "get_ai_status",
+      "name": "查看AI状态",
+      "description": "查询机器人状态并把一张深色状态面板图直接发到当前会话（模型、今日 token 用量与缓存命中率、今日花费、今日会话、运行时长、峰谷时段、日志告警、节日倒计时、系统资源：进程内存/系统内存/CPU）。图片由本工具自己发出，不要再用发送工具转发。用户明确要文字版时传 format:\"text\"。",
+      "category": "system",
+      "icon": "📊",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "description": "可选：image（默认，发面板图）或 text（发 6 行文字卡）。仅当用户明确要文字时才传 text。"
+          }
+        }
+      }
+    }
+  ],
+  "commandOnly": true,
+  "commandRoute": [
+    {
+      "commands": [
+        "AI状态",
+        "状态",
+        "用量",
+        "花费",
+        "成本",
+        "模型",
+        "峰谷",
+        "运行时长",
+        "内存",
+        "CPU",
+        "节日"
+      ],
+      "tool": "get_ai_status"
+    }
+  ],
+  "commands": [
+    "状态",
+    "AI状态",
+    "用量",
+    "花费",
+    "成本",
+    "模型",
+    "峰谷",
+    "运行时长",
+    "内存",
+    "CPU",
+    "日志",
+    "告警",
+    "节日"
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "id": "self-avatar",
+  "name": "自己的头像",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "让机器人查看并修改自己当前 QQ 账号的头像：取头像发到会话/给自己看，也能用表情、当前聊天图片或公开图片换头像。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "permissions": ["web_fetch"],
+  "settings": {
+    "sendToChat": true,
+    "size": "640",
+    "allowAvatarChange": true
+  },
+  "configSchema": {
+    "sendToChat": {
+      "type": "boolean",
+      "label": "查看时顺手发到会话",
+      "description": "开启后，机器人查看自己头像时会默认把头像发到当前群或私聊；关闭后只让机器人自己看，不打扰群友。"
+    },
+    "size": {
+      "type": "enum",
+      "values": ["640", "140", "100"],
+      "label": "头像尺寸",
+      "description": "640 最清晰，适合辨认画面；140/100 更省流量。"
+    },
+    "allowAvatarChange": {
+      "type": "boolean",
+      "label": "允许机器人改自己的头像",
+      "description": "开启后，机器人可以在你明确要求或话题相关时用 set_avatar 换自己的头像；关闭后只能看，不能改。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "self-avatar-note",
+        "title": "自己的头像",
+        "priority": 42,
+        "content": "当话题涉及你自己的长相、形象、头像或 QQ 资料，或群友问「你头像是什么」「看看你的头像」「你是不是换头像了」时，调用 self-avatar__view_avatar 查看自己当前的头像；默认会同时把头像发到当前会话。只在与你有关时用，不要拿它看别人，也不要无缘无故刷屏。用户明确说刚换过头像时传 refresh=true。看完按图片如实说，不要编造看不到的细节。"
+      },
+      {
+        "id": "self-avatar-change",
+        "title": "改自己的头像",
+        "priority": 43,
+        "content": "技能设置里的「允许机器人改自己的头像」开启时，你可以在用户明确要求换头像，或你确实想换且当前话题与你的形象有关时调用 self-avatar__set_avatar；不要每轮都改。关闭时只能看，不能改。优先用自己表情库里的表情（stickerId），其次用用户在当前会话明确发给你并同意做头像的图片（messageId），最后才用公开图片直链（imageUrl）。不要用群友的私人照片、聊天截图或未经允许的图片；不要连续换。一次调用后等结果，不要重复提交；QQ 客户端显示可能有缓存延迟。"
+      }
+    ]
+  }
+}

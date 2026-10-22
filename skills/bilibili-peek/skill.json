@@ -1,0 +1,54 @@
+{
+  "id": "bilibili-peek",
+  "name": "看B站视频",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "给一个 B 站视频链接或 BV 号，抓取标题、UP主、时长、播放/弹幕/点赞数、简介、分P列表，并取回**封面**与 **B 站官方的视频缩略图雪碧图**（该接口已按时间点把视频抽成画面帧、拼成网格图）。两条图片会作为多模态输入直接给模型「看」，因此不需要下载视频、不需要 ffmpeg。用户发 B 站链接让你总结/评价/判断视频内容时调用。",
+  "author": "本地自制（非市场作品）",
+  "entry": "index.js",
+  "category": "utility",
+  "permissions": [],
+  "capabilities": [],
+  "requires": [],
+  "enabledByDefault": true,
+  "settings": {
+    "enabled": true,
+    "includeCover": true,
+    "includeStoryboard": true,
+    "maxStoryboards": 2,
+    "maxImageMB": 4,
+    "timeoutMs": 30000
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用「看B站视频」",
+      "description": "关掉后模型拿不到这个工具。"
+    },
+    "includeCover": {
+      "type": "boolean",
+      "label": "附带封面图",
+      "description": "把视频封面作为图片给模型看。默认开。"
+    },
+    "includeStoryboard": {
+      "type": "boolean",
+      "label": "附带视频画面帧（雪碧图）",
+      "description": "取 B 站官方的缩略图雪碧图——它已按时间点抽好帧。这是「看视频内容」的关键，关掉就只能看到封面。默认开。"
+    },
+    "maxStoryboards": {
+      "type": "number",
+      "label": "最多取几张雪碧图",
+      "description": "长视频的雪碧图可能分多张。默认 2，越多越费 token。"
+    },
+    "maxImageMB": {
+      "type": "number",
+      "label": "单张图片体积上限(MB)",
+      "description": "超过就跳过该图，避免把大图塞进模型。默认 4。"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "单次请求超时(毫秒)",
+      "description": "B 站接口与图片下载的超时。默认 30000。"
+    }
+  }
+}

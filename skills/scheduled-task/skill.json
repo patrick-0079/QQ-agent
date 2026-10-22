@@ -1,0 +1,151 @@
+{
+  "id": "scheduled-task",
+  "name": "定时任务",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "author": "社区整合包",
+  "enabledByDefault": false,
+  "category": "utility",
+  "description": "到点主动唤醒 AI：像「主动发起会话」那样，让它在原来那个会话里执行当时说明的事项",
+  "entry": "index.js",
+  "prompt": {
+    "when": "有人提出「过一会儿 / 到某个点 / 每天 / 每周 提醒我做某事」「帮我记着点」「到点提醒我」时",
+    "examples": [
+      "十分钟后提醒我喝水",
+      "每天八点跟我说早安",
+      "每周一提醒我交周报",
+      "刚才那个提醒取消了"
+    ],
+    "instruction": "到点提醒这类要求用 schedule_task 建任务，别只在嘴上答应——不落盘就等于没答应。text 参数写成「到点要执行的事项」，用第一人称写清对谁做什么（例：提醒 XX 该吃药了；跟大家说早安并报一句今天的天气），到点你会原样看到它。repeat 默认 once；每天用 daily + atTime \"HH:MM\"；每周用 weekly + weekdays（1=周一…7=周日）+ atTime；周期性间隔用 interval + intervalMinutes。回复里一定把具体时间用普通话说清楚（\"好，10 分钟后，也就是 21:35 叫你\"）。查看用 list_scheduled_tasks，取消用 cancel_scheduled_task。别拿它做无意义的定时刷屏；本会话任务数有上限，超了先取消不用的。"
+  },
+  "tools": [
+    {
+      "id": "schedule_task",
+      "name": "安排定时任务",
+      "description": "安排一个定时任务：到点系统会唤醒你（和「主动发起会话」同一条路），你按 text 里写的事项在那个会话里执行。",
+      "category": "system",
+      "icon": "⏰",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "到点要执行的事项，写给你的未来自己看：写清对谁、做什么"
+          },
+          "delayMinutes": {
+            "type": "number",
+            "description": "多少分钟后触发（一次性；与 atTime 二选一）"
+          },
+          "atTime": {
+            "type": "string",
+            "description": "触发时间：一次性用 \"HH:MM\" 或 \"YYYY-MM-DD HH:MM\"；每天/每周用 \"HH:MM\""
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "once",
+              "daily",
+              "weekly",
+              "interval"
+            ],
+            "description": "重复方式，默认 once"
+          },
+          "intervalMinutes": {
+            "type": "number",
+            "description": "repeat=interval 时必填：每隔多少分钟"
+          },
+          "weekdays": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "repeat=weekly 时必填：1=周一 … 7=周日"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "list_scheduled_tasks",
+      "name": "查看定时任务",
+      "description": "查看当前会话里还没结束的定时任务。",
+      "category": "system",
+      "icon": "📋",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "id": "cancel_scheduled_task",
+      "name": "取消定时任务",
+      "description": "取消一个定时任务（单次或周期都行）。",
+      "category": "system",
+      "icon": "🗑️",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "要取消的任务 id（list_scheduled_tasks 里的 [t_xxx]）"
+          },
+          "asOwner": {
+            "type": "boolean",
+            "description": "只有能确认对方是主人/管理员时才传 true"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    }
+  ],
+  "settings": {
+    "maxPerChat": 5,
+    "maxPerUser": 3,
+    "minIntervalMinutes": 5,
+    "tickMs": 20000,
+    "injectTtlMs": 180000,
+    "autoRestart": true,
+    "fallbackText": true
+  },
+  "configSchema": {
+    "maxPerChat": {
+      "type": "number",
+      "label": "每会话最多待办",
+      "description": "同一会话最多同时存在多少个定时任务，默认 5。"
+    },
+    "maxPerUser": {
+      "type": "number",
+      "label": "每人最多待办",
+      "description": "同一用户最多同时存在多少个定时任务，默认 3。"
+    },
+    "minIntervalMinutes": {
+      "type": "number",
+      "label": "最小间隔（分钟）",
+      "description": "相邻两次唤醒的最小间隔，默认 5。"
+    },
+    "tickMs": {
+      "type": "number",
+      "label": "轮询间隔（毫秒）",
+      "description": "检查到期任务的频率，默认 20000。"
+    },
+    "injectTtlMs": {
+      "type": "number",
+      "label": "注入有效期（毫秒）",
+      "description": "到期提醒注入上下文的有效期，默认 180000。"
+    },
+    "autoRestart": {
+      "type": "boolean",
+      "label": "自动恢复",
+      "description": "重启后恢复未完成的定时任务。"
+    },
+    "fallbackText": {
+      "type": "boolean",
+      "label": "兜底文本",
+      "description": "任务没有说明时是否使用兜底提醒文本。"
+    }
+  }
+}

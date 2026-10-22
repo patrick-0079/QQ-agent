@@ -1,0 +1,165 @@
+// 缓存五件套 —— 把库里的五个模块整合到一个插件里（每个模块独立开关，互不干扰）
+//   ① 缓存钉定器 cache-pin        ② 预热闸门修复 prewarm-gate
+//   ③ 前缀缓存卫士 prefix-guard   ④ 峰谷自动切换 peak-valley   ⑤ 思考模式适配 thinking-adapters
+// 本宿主只做四件事：挂载（带存储名前缀）/ 转发钩子 / 转发能力（llm.request-params 串成一条链）/ 导出 internals。
+// 不注册任何工具、不导出 promptSections（零 token 足迹）。
+import * as pin from './lib/cache-pin.js';
+import * as pg from './lib/prefix-guard.js';
+import * as pw from './lib/prewarm-gate.js';
+import * as pv from './lib/peak-valley.js';
+import * as ta from './lib/thinking-adapters.js';
+
+let api = null;
+let active = false;
+
+function prefixed(host, prefix) {
+  const st = host && host.storage;
+  if (!st) return host;
+  return { ...host, storage: {
+    get: (k, f) => st.get(prefix + k, f),
+    set: (k, v) => st.set(prefix + k, v),
+    remove: (k) => st.remove(prefix + k)
+  } };
+}
+
+// ── 省 token 三件套（从 token-guard 原样搬过来，逻辑不改）──────────────────
+const THINKING_KEYS = ['thinking', 'thinking_budget', 'thinkingBudget', 'reasoning', 'reasoning_effort', 'reasoningEffort', 'enable_thinking', 'think', 'extra_body'];
+const ROUND_HINT = '【一轮做完】要发言又要收尾时，send_message 与 finish 可以在同一次调用里一起用；能一轮做完的事就别分成两轮。';
+const roundStats = { hint: 0, suppress: 0, capped: 0, seen: 0 };
+
+export function classifyRound(messages, minWakeChars = 8) {
+  const arr = Array.isArray(messages) ? messages : [];
+  const user = [...arr].reverse().find((m) => m && m.role === 'user');
+  const text = String(user?.content || '');
+  if (!text) return { kind: 'normal' };
+  if (text.includes('（主动机会）')) return { kind: 'proactive' };
+  if (text.includes('【本轮只需回执】')) return { kind: 'ack' };
+  const at = text.lastIndexOf('【本次唤醒】');
+  if (at >= 0) {
+    const wake = text.slice(at + 6).split('\n').slice(1).join('\n').trim();
+    const plain = wake.replace(/#\d+/g, '').replace(/[（(][^）)]*[）)]/g, '').trim();
+    if (plain.length > 0 && plain.length <= minWakeChars && !/[?？]/.test(plain)) return { kind: 'short', chars: plain.length };
+  }
+  return { kind: 'normal' };
+}
+
+function cfg() { try { return (api && typeof api.config === 'function' ? api.config() : null) || {}; } catch { return {}; } }
+const asEnum = (v, ok, d) => (ok.includes(String(v)) ? String(v) : d);
+const asNum = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+
+// 思考守门 + 输出上限：只在"主动搭话 / 纯回执 / 一句话唤醒"三类轮次动手
+function applyTokenGuards(body, args, touched) {
+  if (!body || typeof body !== 'object') return;
+  const kind = classifyRound(args?.messages || body.messages).kind;
+  roundStats.seen += 1;
+  const mode = asEnum(cfg().thinkGuard, ['off', 'auto'], 'auto');
+  if (mode === 'auto' && (kind === 'proactive' || kind === 'ack' || kind === 'short')) {
+    let n = 0;
+    for (const k of THINKING_KEYS) { if (k in body) { delete body[k]; n += 1; } }
+    if (n) { touched.omitTemperature = false; roundStats.suppress += 1; }
+  }
+  const cap = asNum(cfg().maxTokensAck, 0, 0, 8000);
+  if (cap > 0 && (kind === 'ack' || kind === 'proactive') && !(Number(body.max_tokens) > 0)) {
+    body.max_tokens = cap;
+    touched.set = true; roundStats.capped += 1;
+  }
+}
+
+// ── ⑨ 段回填（实测有效：全量 120 轮 miss% 12.8→9.1）────────────────────────
+//   实测形态：巨块【角色设定】等会在系统提示里"时有时无"（核心的上下文预算），
+//   它一消失就从第 4265 字起整段作废（85% 的 miss）。做法：按上一轮的段顺序重建 sys，
+//   缺的段用上一轮原文补回（同一份文本 → 走命中价），顺序也不再抖动。
+const secState = new Map();
+const refillStat = { filled: 0, added: 0 };
+const SEC_START_RE = /^(▸|【)/;
+
+function refillSections(sysText, chatKey) {
+  const NLc = String.fromCharCode(10);
+  const parse = (text) => {
+    const ls = String(text).split(NLc);
+    const pro = []; const secs = []; let cur = null;
+    for (const ln of ls) {
+      if (SEC_START_RE.test(ln)) { if (cur) secs.push(cur); cur = { head: ln.slice(0, 30), body: [ln] }; }
+      else if (cur) cur.body.push(ln); else pro.push(ln);
+    }
+    if (cur) secs.push(cur);
+    return { pro: pro.join(NLc), secs: secs.map((x) => ({ head: x.head, body: x.body.join(NLc) })) };
+  };
+  const parsed = parse(sysText);
+  const nowMap = new Map(parsed.secs.map((x) => [x.head, x.body]));
+  let st = secState.get(chatKey);
+  if (!st) {
+    secState.set(chatKey, { order: parsed.secs.map((x) => x.head), byHead: new Map(nowMap) });
+    if (secState.size > 200) secState.delete(secState.keys().next().value);
+    return sysText;
+  }
+  const before = String(sysText).length;
+  const out = [];
+  for (const h of st.order) {
+    if (nowMap.has(h)) { out.push(nowMap.get(h)); st.byHead.set(h, nowMap.get(h)); }
+    else if (st.byHead.has(h)) { out.push(st.byHead.get(h)); refillStat.filled += 1; }
+  }
+  for (const x of parsed.secs) if (!st.order.includes(x.head)) { st.order.push(x.head); st.byHead.set(x.head, x.body); out.push(x.body); }
+  const rebuilt = parsed.pro + NLc + out.join(NLc);
+  const grew = rebuilt.length - before;
+  const maxAdd = asNum(cfg().refillMaxAddChars, 30000, 0, 200000);
+  if (out.length && grew <= maxAdd) {
+    if (grew > 0) refillStat.added += grew;
+    return rebuilt;
+  }
+  return sysText;
+}
+
+export function setup(host) {
+  api = host || api;
+  const mounts = [[pin, 'pin:', '缓存钉定器'], [pg, 'pg:', '前缀缓存卫士'], [pw, 'pw:', '预热闸门修复'], [pv, 'pv:', '峰谷切换'], [ta, 'ta:', '思考模式适配']];
+  for (const [m, pre, name] of mounts) {
+    try { m.setup(prefixed(host, pre)); }
+    catch (e) { try { api?.warn?.(name + ' 挂载失败（不影响其它模块）：' + (e && e.message ? e.message : e)); } catch { /* ignore */ } }
+  }
+}
+
+export function activate() {
+  active = true;
+  for (const m of [pin, pg, pw, pv, ta]) { try { m.activate?.(); } catch { /* ignore */ } }
+}
+export function deactivate() {
+  active = false;
+  for (const m of [pin, pg, pw, pv, ta]) { try { m.deactivate?.(); } catch { /* ignore */ } }
+}
+export function available() { return { ok: true }; }
+
+// ── 能力转发 ──────────────────────────────────────────────────────────────
+export const providers = {};
+// llm.request-params：思考适配器（加）→ 本插件无自有逻辑 → 预热闸门（恰好一次预热）
+providers['llm.request-params'] = (args) => {
+  // ⚠️ 关键：必须像核心那样**逐个串联** —— 每个转换器拿到上一个的输出，改动不许被覆盖。
+  //    （之前写成 ok(w0) || ok(t0) 只返回一个 → 后一个基于原始 body 算 → 前一个的改动被丢掉，
+  //     那正是"合并后只有 91%"的结构性原因之一。）
+  let body = args?.body;
+  let omitTemperature;
+  const steps = [
+    (a) => ta.providers?.['llm.request-params']?.(a),                 // ⑤ 思考适配：加思考参数
+    (a) => {                                                          // ⑥⑦⑧ 三件套：按轮次摘思考/限长
+      const touched = { omitTemperature: undefined, set: false };
+      try { applyTokenGuards(a?.body, a, touched); } catch { /* ignore */ }
+      if (touched.set || touched.omitTemperature !== undefined) {
+        const out = { body: a?.body };
+        if (touched.omitTemperature !== undefined) out.omitTemperature = touched.omitTemperature;
+        return out;
+      }
+      return undefined;
+    },
+    (a) => pw.providers?.['llm.request-params']?.(a)                  // ② 预热闸门：恰好一次预热
+  ];
+  for (const fn of steps) {
+    let r;
+    try { r = fn({ ...args, body }); } catch { r = undefined; }
+    if (!r || typeof r !== 'object' || Object.keys(r).length === 0) continue;
+    if (r.body) body = r.body;                                        // 串下去
+    if (typeof r.omitTemperature === 'boolean') omitTemperature = r.omitTemperature;
+  }
+  const final = { body };
+  if (typeof omitTemperature === 'boolean') final.omitTemperature = omitTemperature;
+  return final;
+};

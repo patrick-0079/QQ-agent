@@ -1,0 +1,102 @@
+{
+  "id": "hell-joke",
+  "name": "地狱笑话",
+  "version": "1.4.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "群里提到「地狱笑话」时才把那套写法（一个内核：把真实缺失藏进一句正经话术；六副外壳：问答体 / 术语体 / 科普体 / 熟语体 / 原话体 / 对话体）连同参考库塞进上下文，让模型一次只出两条、不解释的地狱笑话；回复按空行切成条只留两条，多出来的自评、解释、开场白由程序删掉，发送前再兜一遍，并且**把两条拆成两条独立消息分开发**。平时不占上下文，也不注册任何工具。",
+  "author": "本地",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "alwaysOn": false,
+    "triggers": "",
+    "jokes": 2,
+    "maxLines": 8,
+    "stripMeta": true,
+    "interceptSend": true,
+    "splitSend": true,
+    "windowSec": 120,
+    "refPath": "",
+    "refLimit": 15,
+    "style": "",
+    "maxChars": 40,
+    "extraSamples": ""
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用地狱笑话生成器",
+      "description": "关掉后完全不介入：不塞设定、不改写回复，一切回到模型自己发挥。"
+    },
+    "alwaysOn": {
+      "type": "boolean",
+      "label": "一直保留这套设定（不推荐）",
+      "description": "打开后每轮对话都带着设定，不用等触发词；代价是每轮多一千多 token。"
+    },
+    "triggers": {
+      "type": "string",
+      "multiline": true,
+      "label": "额外触发词（一行一条）",
+      "description": "默认已认：地狱笑话 / 地狱段子 / 地狱梗 / 地狱笑话插件。这里可以再补自己的叫法。"
+    },
+    "maxLines": {
+      "type": "number",
+      "label": "整条回复最多几行（兜底）",
+      "description": "默认 8 行 —— 两条对话体（每条最多四行）正好放得下。空行不计入行数；真正的截断按「条」算，这里只是防刷屏的最后一道闸。"
+    },
+    "jokes": {
+      "type": "number",
+      "label": "一次发几条",
+      "description": "默认 2 条。程序按空行（没有空行时按 1./①/第2条 这类编号）把回复切成条，只留前这么多条，剩下的直接砍掉。"
+    },
+    "stripMeta": {
+      "type": "boolean",
+      "label": "删掉自评、解释、开场白",
+      "description": "程序会删掉以「笑点/包袱/评分/自评/草稿/注：」开头的行、「（笑点：…）」这类括注，以及「给你两条：」这种开场白。"
+    },
+    "interceptSend": {
+      "type": "boolean",
+      "label": "发送前兜底清洗",
+      "description": "不管是模型直接把笑话写进回复，还是走发送消息工具，程序在真正发出去之前再洗一遍（只对触发后的那条生效，一次触发只洗一条）。"
+    },
+    "splitSend": {
+      "type": "boolean",
+      "label": "两条分开发（不合并在一条里）",
+      "description": "打开后，清理完的回复如果含两条以上笑点，会拆成多条塞进发送队列，由核心队列逐条发出（自带 1-3 秒句间间隔）。关掉就恢复成一条消息发完。"
+    },
+    "windowSec": {
+      "type": "number",
+      "label": "触发后生效多少秒",
+      "description": "从提到地狱笑话开始算，这段时间内的回复按笑话模式清洗，默认 120 秒。"
+    },
+    "refPath": {
+      "type": "string",
+      "label": "参考库文件",
+      "description": "默认读插件目录下的「参考-地狱笑话.md」，只取「## 成品库」一节里以 - 开头的行。留空用默认路径；也可以填别的 md 绝对路径。"
+    },
+    "refLimit": {
+      "type": "number",
+      "label": "每次带几条参考",
+      "description": "从参考库前面取几条塞给模型当口味校准，默认 12，建议不超过 20（太多会挤占上下文）。成品库按外壳分块排列，前面的最影响手感。"
+    },
+    "style": {
+      "type": "string",
+      "label": "固定语体（留空=五种随便挑）",
+      "description": "填了就只用这些外壳，其余禁用。可写：问答、术语、科普、熟语、原话、对话，多个用逗号隔开。比如「对话,原话」就只出这两种。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "单条字数上限",
+      "description": "默认 40 字，写进设定里约束模型。术语体和科普体允许超出 20 字，方便塞完整术语。"
+    },
+    "extraSamples": {
+      "type": "string",
+      "multiline": true,
+      "label": "临时追加几条（不进参考库）",
+      "description": "一行一条，附在参考库后面。适合临时试口味，长期收藏请写进参考文档的成品库。"
+    }
+  }
+}

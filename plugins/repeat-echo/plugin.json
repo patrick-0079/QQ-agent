@@ -1,0 +1,74 @@
+{
+  "id": "repeat-echo",
+  "name": "群聊复读机",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "entry": "index.js",
+  "description": "群里两个人连着发一模一样的话时，薄荷跟着复读一遍（纯本地判定，0 token、不调模型）。\n\n【怎么用】\n· 装上即生效：A 发「晚安」、B 也跟着发「晚安」→ 薄荷发一条「晚安」。\n· 不会自己刷屏：同群两次复读至少隔 90 秒、每 30 分钟最多 4 次、同一句 30 分钟内只复读一次、全部群每小时合计最多 15 次；薄荷正在回话（有会话在跑或排队）时直接不复读，避免和模型回复叠成两条。\n· 只复读群聊的纯文字（默认不限字数）：图片、拍一拍、@薄荷、原始 CQ 串一律跳过；睡眠时段照旧被发送闸门拦住。\n· 阈值都在下面调；不想用就把开关关掉。",
+  "author": "DSH",
+  "enabledByDefault": true,
+  "capabilities": [
+    "repeat-echo.status"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "pairWindowSec": 180,
+    "maxLen": 0,
+    "cooldownSec": 90,
+    "maxPerWindow": 4,
+    "windowMin": 30,
+    "maxPerHour": 15,
+    "sameTextBlockMin": 30,
+    "onlyWhenIdle": true
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用群聊复读",
+      "description": "关掉后一条都不复读（钩子会摘掉，零副作用）。"
+    },
+    "pairWindowSec": {
+      "type": "number",
+      "label": "跟话窗口（秒）",
+      "description": "两个人的同一句话要在这个时间内前后挨着出现才算复读，默认 180 秒。"
+    },
+    "maxLen": {
+      "type": "number",
+      "label": "最长复读字数（0 = 不限制）",
+      "description": "默认 0 = 不限制：长句也照复读（硬上限 400 字）。填数字则只复读不超过该字数的句子。"
+    },
+    "cooldownSec": {
+      "type": "number",
+      "label": "同群冷却（秒）",
+      "description": "同一个群里两次复读的最小间隔，默认 90 秒。"
+    },
+    "maxPerWindow": {
+      "type": "number",
+      "label": "每群配额（次）",
+      "description": "统计窗口内同一个群最多复读几次，默认 4 次。"
+    },
+    "windowMin": {
+      "type": "number",
+      "label": "配额窗口（分钟）",
+      "description": "每群配额的统计窗口，默认 30 分钟。"
+    },
+    "maxPerHour": {
+      "type": "number",
+      "label": "全局配额（次/小时）",
+      "description": "所有群加起来每小时最多复读几次，默认 15 次 —— 防她满世界复读。"
+    },
+    "sameTextBlockMin": {
+      "type": "number",
+      "label": "同句封禁（分钟）",
+      "description": "同一句话在这个时间内只复读一次（第三个人再跟也不再复读），默认 30 分钟。"
+    },
+    "onlyWhenIdle": {
+      "type": "boolean",
+      "label": "回话时让路",
+      "description": "薄荷正在处理这个群（会话在跑或已排队）时不复读，避免和模型回复叠成两条。"
+    }
+  },
+  "prompt": null
+}

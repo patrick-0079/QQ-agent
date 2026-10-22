@@ -1,0 +1,322 @@
+{
+  "id": "memory-plus",
+  "name": "记忆与存档优化",
+  "version": "2.5.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "description": "把机器人的记忆升级成「长期 / 短期两层」，并接管控制台「记忆」页（没有独立的印象页）。短期记忆由模型自己攒、带提及次数、到点自动过期；判定够稳的可晋升成长期（晋升后只能删，不能退回短期）。长期与短期都能压缩成标签，**喂给模型时优先给标签**（要原话让模型自己展开），约定类永远用原文。点「整理本记忆」一次做完：清过期、压标签、判晋升、从聊天记录里提炼新记忆；遇到限流自动每 30 秒排队重试并报告谁失败了。右栏有常驻状态区（进度、开关摘要、失败名单、刷新状态）。另附聊天记录检索（时间+发送人+关键词）、存档定期清理与一键回档、拿不准时私聊问主人，以及可选的省 token 护栏（记录裁剪、段落裁剪、工具护栏、结果截断——默认只开记录裁剪）。所有功能都有独立开关。",
+  "author": "本机定制",
+  "enabledByDefault": true,
+  "permissions": [],
+  "capabilities": [
+    "tool.guard"
+  ],
+  "settings": {
+    "enableMemory": true,
+    "enableShortTerm": true,
+    "enableLabelFirst": true,
+    "enableArchiveTools": true,
+    "enableHistoryTrim": true,
+    "historyLimit": 40,
+    "enableSystemTrim": false,
+    "trimSectionTitles": "",
+    "trimSkipChats": "",
+    "enableToolCap": false,
+    "toolResultMaxChars": 4000,
+    "capOnlyTools": "",
+    "enableToolGuard": true,
+    "blockedTools": "",
+    "mirrorCoreAppend": true,
+    "autoExtractEnabled": true,
+    "ruleExtractEnabled": true,
+    "autoExtractIntervalHours": 3,
+    "autoExtractMinNewMessages": 20,
+    "modelProvider": "",
+    "modelName": "",
+    "shortTtlDays": 14,
+    "promoteMinHits": 3,
+    "labelsPerMember": 6,
+    "longPerMember": 8,
+    "shortPerMember": 4,
+    "appointmentAlwaysFull": true,
+    "injectCompactThreshold": 6,
+    "consolidateExtractFromArchive": true,
+    "consolidateArchiveScanCount": 120,
+    "archiveCleanupEnabled": true,
+    "archiveRetainDays": 30,
+    "archiveCleanupIntervalDays": 30,
+    "archiveBackupBeforePurge": true,
+    "ownerQq": "",
+    "ownerAskEnabled": true,
+    "askCooldownMinutes": 120,
+    "uiPanel": true,
+    "verbose": false
+  },
+  "configSchema": {
+    "enableMemory": {
+      "type": "boolean",
+      "label": "① 两层记忆（改写提示词里的记忆段）",
+      "description": "开启（默认）：把提示词里的【记忆】段换成长期/短期两层版本。关掉：完全用核心原版（每人最近三条），本插件不再碰这段。想整块停用本插件，请直接用「插件」页那个插件级开关，不要用别的总开关。"
+    },
+    "enableShortTerm": {
+      "type": "boolean",
+      "label": "② 短期记忆（会过期、可晋升）",
+      "description": "开启（默认）：允许攒短期记忆，并自动过期清理、到次数提示晋升。关掉：只剩长期记忆，不再新建短期记忆，也不做过期清理。"
+    },
+    "enableLabelFirst": {
+      "type": "boolean",
+      "label": "③ 有标签时优先给标签（省 token）",
+      "description": "开启（默认）：某人已经有标签时，提示词里只给「标签 + 约定原文」，不再堆全文，并明确告诉模型「要原话就调 recall_impression 的 mode=full」——也就是全文与标签两种模式并存。关掉：永远给全文。"
+    },
+    "enableArchiveTools": {
+      "type": "boolean",
+      "label": "④ 聊天记录检索工具",
+      "description": "开启（默认）：给模型 search_archive（按时间 + 发送人 + 关键词查记录）。关掉：这个工具消失。"
+    },
+    "enableHistoryTrim": {
+      "type": "boolean",
+      "label": "⑤ 裁剪喂给模型的聊天记录",
+      "description": "开启（默认）：拼提示词时【已读信息】只保留最近 N 条，并标注省略了多少、要去哪翻。关掉：核心原本给多少就给多少（默认 80 条）。"
+    },
+    "historyLimit": {
+      "type": "number",
+      "label": "聊天记录保留条数",
+      "description": "【已读信息】最多带多少条（默认 40）。调小更省 token；调大机器人记得更多细节。",
+      "min": 5,
+      "max": 200,
+      "step": 5,
+      "default": 40
+    },
+    "enableSystemTrim": {
+      "type": "boolean",
+      "label": "⑥ 裁掉系统提示里的整段技能规则",
+      "description": "默认关闭。开启后，把下面清单里命中的技能段落整段删掉；只裁渲染器用「▸ 标题」标记的技能段，核心的安全规则 / 工具协议 / 人设永远不会被裁。之前默认裁「跑团」，但你已经把跑团技能禁用了，所以这里留空、开关也关掉——不用就不占设置。"
+    },
+    "trimSectionTitles": {
+      "type": "string",
+      "multiline": true,
+      "label": "要裁掉的技能段落（一行一个关键词）",
+      "description": "留空 = 不裁（当前默认，因为你已经把跑团技能禁用了，不需要再裁）。以后如果又装了某个「规则常驻、不相关时纯带偏人设」的技能，把它的段落标题关键词填这里即可（例如 跑团 / 内心生活 / 生活事件）。"
+    },
+    "trimSkipChats": {
+      "type": "string",
+      "multiline": true,
+      "label": "不做裁剪的会话（一行一个，如 group:123456）",
+      "description": "要跑团的群填这里，这些会话不裁系统提示。留空 = 所有会话都按上面的清单裁。"
+    },
+    "enableToolCap": {
+      "type": "boolean",
+      "label": "⑦ 截断过长的工具结果",
+      "description": "默认关闭。⚠️ 谨慎打开：截断是一刀切的，像 list_stickers（表情 id 列表）、get_recent_messages（你点名要的聊天记录）、搜索类结果被截断后会**丢信息**（实测可能导致模型拿不到有效 id 而报错）。只有当你发现某个工具明显把上下文塞满、且截断它不会丢关键信息时再开，并在下面填上它的名字。"
+    },
+    "toolResultMaxChars": {
+      "type": "number",
+      "label": "工具结果字数上限",
+      "description": "开启截断后，单个工具结果最多保留多少字（默认 4000）。比原来的 1200 宽松很多，避免误伤长列表类工具。",
+      "min": 500,
+      "max": 20000,
+      "step": 100,
+      "default": 4000
+    },
+    "capOnlyTools": {
+      "type": "string",
+      "multiline": true,
+      "label": "只截断这些工具（一行一个，支持前缀；留空 = 所有工具）",
+      "description": "强烈建议填上具体工具名，例如 chat-archive__ 或某个统计类工具。留空等于对所有工具生效，容易误伤。"
+    },
+    "enableToolGuard": {
+      "type": "boolean",
+      "label": "⑧ 工具护栏（拦截噪声工具 / 跟着功能开关走）",
+      "description": "默认开启。它做两件事：① 让下面清单里的工具运行期不可用；② 上面 ①~④ 某个功能被关掉时，把对应工具也置为不可用（界面会写明原因）。建议保持开启。"
+    },
+    "blockedTools": {
+      "type": "string",
+      "multiline": true,
+      "label": "被拦截的工具（一行一个，支持前缀匹配）",
+      "description": "留空 = 不额外拦任何工具（当前默认，因为你已经把「群聊档案检索 + 活跃榜」整个技能禁用了）。以后遇到某个工具被反复挂着调、结果与话题无关还占上下文时，把它的 id 填这里即可。"
+    },
+    "mirrorCoreAppend": {
+      "type": "boolean",
+      "label": "⑨ 把核心 memory_append 记的东西也存一份短期记忆",
+      "description": "开启（默认）：模型用核心老接口记观察时，同时镜像一条短期记忆（按内容去重、会合并提及次数）。为什么需要：实测模型几乎只用 memory_append、不用我们的 note_impression，不镜像的话\"短期记忆\"永远是空的。"
+    },
+    "autoExtractEnabled": {
+      "type": "boolean",
+      "label": "⑩ 自动从聊天记录里提取短期记忆",
+      "description": "开启（默认）：某会话距上次提取够久、且攒够新消息时，自动让模型回看记录、把值得记的稳定信息记成短期记忆。这是\"不依赖模型自觉\"的兜底，也是唯一会产生额外模型调用的功能（约每会话每几小时一次），不需要就关掉。"
+    },
+    "ruleExtractEnabled": {
+      "type": "boolean",
+      "label": "⑪ 规则提取约定类记忆（不花 token）",
+      "description": "开启（默认）：用死规则从聊天记录里捞「说好/答应/别忘了 + 明天/晚上八点」这类明确约定，直接记成短期记忆。全程不调用模型、不花 token，模型限流时也照样能记。一次最多两条，宁可少记也不误记。"
+    },
+    "autoExtractIntervalHours": {
+      "type": "number",
+      "label": "自动提取的最小间隔（小时）",
+      "description": "同一个会话最多这么久提取一次（默认 3 小时）。调大更省 token。",
+      "min": 1,
+      "max": 72,
+      "step": 1,
+      "default": 3
+    },
+    "autoExtractMinNewMessages": {
+      "type": "number",
+      "label": "自动提取需要的新消息条数",
+      "description": "距离上次提取至少新增这么多条消息，才值得回看一次（默认 20 条）。调大更省 token。",
+      "min": 5,
+      "max": 500,
+      "step": 5,
+      "default": 20
+    },
+    "modelProvider": {
+      "type": "string",
+      "label": "整理用的专用渠道（留空 = 跟随主模型）",
+      "description": "本插件的模型调用（压缩标签 / 判定晋升 / 从聊天记录提取）单独走哪个渠道。填 provider 的 id（在「设置 → 模型」里能看到），或直接用「记忆」页右上角状态区的下拉选。**留空 = 用主模型**。想省主模型的额度、或主模型限流时，就挑一个便宜的小模型给它。"
+    },
+    "modelName": {
+      "type": "string",
+      "label": "整理用的专用模型（留空 = 跟随主模型）",
+      "description": "配合上一项使用。填该渠道下的模型 id；建议选一个能关思考的小模型（压缩标签这类判断不需要思考，开着只会烧 token）。"
+    },
+    "shortTtlDays": {
+      "type": "number",
+      "label": "短期记忆保留天数",
+      "description": "没被晋升成长期记忆的短期记忆，超过这么多天自动删除（默认 14 天）。被晋升过的内容已经转成长期记忆，不受影响。",
+      "min": 1,
+      "max": 365,
+      "step": 1,
+      "default": 14
+    },
+    "promoteMinHits": {
+      "type": "number",
+      "label": "建议晋升的提及次数",
+      "description": "一条短期记忆被反复提到这么多次后，会被标成「⚑建议晋升」，提示模型考虑转成长期记忆（默认 3 次）。手工记的记忆不受这个门槛限制（人工确认过就可以直接晋升）。",
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "default": 3
+    },
+    "labelsPerMember": {
+      "type": "number",
+      "label": "每人最多保留几个标签",
+      "description": "记忆压缩成短标签后每人最多留几个（默认 6 个）。标签只是给模型快速过目用，原文不会丢。",
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "default": 6
+    },
+    "longPerMember": {
+      "type": "number",
+      "label": "喂给模型时每人几条长期记忆",
+      "description": "拼进提示词的长期记忆条数上限（默认 8 条）。这里是「按重要度排序后取」，不是固定取最近几条 —— 约定类永远排最前且用原文。",
+      "min": 1,
+      "max": 30,
+      "step": 1,
+      "default": 8
+    },
+    "shortPerMember": {
+      "type": "number",
+      "label": "喂给模型时每人几条短期记忆",
+      "description": "拼进提示词的短期记忆条数上限（默认 4 条，按提及次数排序）。",
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "default": 4
+    },
+    "appointmentAlwaysFull": {
+      "type": "boolean",
+      "label": "约定类记忆始终用原文",
+      "description": "开启（默认）：说好的事、答应过的事、要提醒的事，喂给模型时不被压缩成标签，永远用原话，避免把约定记歪。"
+    },
+    "injectCompactThreshold": {
+      "type": "number",
+      "label": "多少人以上改用标签速览",
+      "description": "一次对话涉及的人数超过这个值时，长期记忆切成「标签速览」模式省 token（默认 6）。模型需要原话时会自己用 recall_impression 展开，信息不会丢。",
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "default": 6
+    },
+    "consolidateExtractFromArchive": {
+      "type": "boolean",
+      "label": "整理时从聊天记录里提取记忆",
+      "description": "开启（默认）：点「整理本记忆」时，会从最近的聊天记录存档里挑出值得记住的内容，转成短期记忆。"
+    },
+    "consolidateArchiveScanCount": {
+      "type": "number",
+      "label": "整理时看最近多少条聊天记录",
+      "description": "从存档里提取记忆时最多回看多少条消息（默认 120 条）。",
+      "min": 20,
+      "max": 2000,
+      "step": 10,
+      "default": 120
+    },
+    "archiveCleanupEnabled": {
+      "type": "boolean",
+      "label": "定时清理聊天记录存档",
+      "description": "开启（默认）：按下面的间隔自动清理过旧的聊天记录存档。只清机器人本地的存档，QQ 里的消息不会有任何变化。"
+    },
+    "archiveRetainDays": {
+      "type": "number",
+      "label": "存档保留天数",
+      "description": "超过这么多天的聊天记录会被删掉（默认 30 天，约一个月）。",
+      "min": 1,
+      "max": 3650,
+      "step": 1,
+      "default": 30
+    },
+    "archiveCleanupIntervalDays": {
+      "type": "number",
+      "label": "多久自动清理一次（天）",
+      "description": "自动清理的间隔，默认 30 天（一个月一次）。手动清理不受这个限制。",
+      "min": 1,
+      "max": 365,
+      "step": 1,
+      "default": 30
+    },
+    "archiveBackupBeforePurge": {
+      "type": "boolean",
+      "label": "清理前先备份（可一键回档）",
+      "description": "开启（默认）：删除前先把原存档复制一份，之后可以在这个会话的存档区点「一键回档」还原。关掉后删了就真没了。"
+    },
+    "ownerQq": {
+      "type": "string",
+      "label": "主人 QQ 号（拿不准时问谁）",
+      "description": "填上你的 QQ 号后，模型在「这条该不该记 / 该不该晋升」上拿不准时，可以主动私聊问你。留空 = 关闭主动询问（模型会按保守规则自己处理）。"
+    },
+    "ownerAskEnabled": {
+      "type": "boolean",
+      "label": "允许模型主动私聊问主人",
+      "description": "开启（默认）：模型拿不准记忆判定时，可以调 ask_owner 主动私聊你提问。问题会出现在「记忆」页的「待你裁决」里，你直接在私聊里回它就行。"
+    },
+    "askCooldownMinutes": {
+      "type": "number",
+      "label": "主动询问的冷却时间（分钟）",
+      "description": "两次主动提问之间至少间隔多久（默认 120 分钟），防止刷屏。",
+      "min": 1,
+      "max": 10080,
+      "step": 1,
+      "default": 120
+    },
+    "uiPanel": {
+      "type": "boolean",
+      "label": "接管控制台「记忆」页",
+      "description": "开启（默认）：把记忆页换成这套界面（长期/短期/标签/待裁决/存档清理与回档）。关掉 = 完全回到原版记忆页，机器人功能不受影响。"
+    },
+    "verbose": {
+      "type": "boolean",
+      "label": "输出详细日志",
+      "description": "开启后每次注入、整理、清理都往控制台打一行，便于确认真的在工作（默认安静）。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "memory-plus-note",
+        "title": "记忆（长期 / 短期两层）",
+        "priority": 45,
+        "content": "你的【记忆】段分两层，用法不同：\n- 长期记忆：稳定、可信、已经反复确认过。可以直接引用，不用犹豫。\n- 短期记忆：最近才形成的临时观察，会过期、可能不准。引用时留余地（「最近好像在…」），不要当定论。\n- 约定类（说好/答应过/要提醒的事）：无论长期还是短期，一律优先看、并且用原文复述，不许改写细节（时间、人名、事情）。\n- 记忆标签：每个人后面那几个词是压缩后的速览。需要原话、或要判断一个人到底怎么回事时，调 recall_impression（mode=full）把原文展开，不要靠标签猜。\n- 攒记忆：新观察用 note_impression 记成短期记忆（重复观察到同一件事会自动累加提及次数，次数越高越可能是真的）。反复出现、你认为已经稳定的，用 promote_impression 晋升成长期记忆，并写一句理由。晋升后只能删，不能退回短期。\n- 拿不准就别猜：用 ask_owner 直接问主人，比自己瞎记要强。\n- 别把内部机制说给群友听（不要提「短期记忆」「标签」「晋升」这些词）。"
+      }
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "image-compat",
+  "name": "图片格式兼容",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "model",
+  "description": "处理模型不接受某些图片格式的情况：提前识别不支持的格式，被拒绝时摘掉图片重试一轮。",
+  "author": "QQ Agent",
+  "enabledByDefault": true,
+  "capabilities": [
+    "image.mime-support",
+    "llm.retry-advisor"
+  ],
+  "requires": [],
+  "settings": {
+    "unsupportedMimes": "image/webp,image/avif",
+    "stripOnReject": true
+  },
+  "configSchema": {
+    "unsupportedMimes": {
+      "type": "string",
+      "label": "不喂给模型的图片格式",
+      "description": "逗号分隔。默认 image/webp,image/avif —— 部分本地视觉接口遇到这两种会直接 400 把整轮打挂。留空表示都尝试发送。"
+    },
+    "stripOnReject": {
+      "type": "boolean",
+      "label": "被拒时摘掉图片重试一轮",
+      "description": "开启后：带图请求被拒绝时，自动摘掉图片重发一次，至少把纯文字部分处理掉，而不是整轮失败。"
+    }
+  },
+  "prompt": null
+}

@@ -1,0 +1,47 @@
+{
+  "id": "video-frames",
+  "name": "视频抽帧",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "用 ffmpeg 把视频抽成若干张图片，让只能看图的模型也能理解视频内容。",
+  "author": "QQ Agent",
+  "enabledByDefault": true,
+  "capabilities": [
+    "video.frames",
+    "video.frames.available"
+  ],
+  "requires": [],
+  "settings": {
+    "count": 4,
+    "maxWidth": 768,
+    "quality": 4
+  },
+  "configSchema": {
+    "count": {
+      "type": "number",
+      "label": "抽帧数量",
+      "description": "1~12 帧。越多越能还原过程，token 成本也越高。默认 4。"
+    },
+    "maxWidth": {
+      "type": "number",
+      "label": "帧宽上限（像素）",
+      "description": "默认 768。调小可以省 token，但太小的图看不清细节。"
+    },
+    "quality": {
+      "type": "number",
+      "label": "JPEG 质量（2~31，越小越清晰）",
+      "description": "默认 4。调大可以减小体积。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "video-frames-note",
+        "title": "视频理解",
+        "priority": 35,
+        "content": "你看到的视频画面是抽帧截图，不是连续视频：帧与帧之间发生的事你看不到。描述时用\"看起来\"\"某一帧里\"这类措辞，不要断言中间的连续过程。"
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "friend-approval",
+  "name": "好友申请审批",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "有人申请加机器人为好友、或群友要求机器人加他好友时，先私聊请示审批人（主人/管理员），审批人同意后才通过，机器人不会自作主张加好友。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "capabilities": [
+    "friend.request"
+  ],
+  "requires": [],
+  "settings": {
+    "approvers": "",
+    "maxPendingHours": 12
+  },
+  "configSchema": {
+    "approvers": {
+      "type": "string",
+      "label": "审批人 QQ 号",
+      "description": "谁说了算。多个用逗号或空格隔开，例如「123456, 789012」。留空则默认用「设置 → 白名单」里私聊那一栏的人。"
+    },
+    "maxPendingHours": {
+      "type": "number",
+      "label": "申请保留时长（小时）",
+      "description": "超过这个时间还没批的申请自动作废，默认 12。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "friend-approval-note",
+        "title": "加好友要请示审批人",
+        "priority": 72,
+        "content": "加好友这件事你说了不算，必须审批人点头。有人申请加我为好友时我已经私聊请示审批人，审批人回复同意/拒绝时，用 friend-approval__decide_friend_request 去执行（decision=approve 或 reject），不要只用嘴答应。群友在群里要求「加我」「加个好友」这类时，先调用 friend-approval__request_friend_add（userId 填对方 QQ 号，从发言人标签 (QQ:xxx) 里取）转成请示，然后在群里回一句「我去问下管理员」，不要直接答应也不要一口回绝。协议端不允许机器人主动发好友申请，所以审批人同意后是请对方自己发一条申请，那条申请会自动通过。没搞清对方要什么之前不要调用这些工具。"
+      }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "quote-target",
+  "name": "回复引用保护",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "防止机器人想回的那句话被别人顶掉：她本来准备回复群友 A 的消息，生成回复期间群友 B 又发了一句，直接把文字发出去就会看起来像在回 B。这个插件会读出最新的聊天记录，发现目标消息已经被顶掉时，自动给她这一轮的回复加上对 A 原消息的引用（replyToMessageId），让群里看得出她回的是谁。如果她本来就自己引用了某条，或者目标仍是最新消息，则不动。",
+  "author": "主人 & DSH",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "onlyGroups": true,
+    "preferAddressed": true,
+    "minNewMessages": 1,
+    "quoteMedia": false,
+    "logChanges": false
+  },
+  "configSchema": {
+    "onlyGroups": {
+      "type": "boolean",
+      "label": "只在群聊生效",
+      "description": "默认开。私聊一般不需要防顶楼引用。"
+    },
+    "preferAddressed": {
+      "type": "boolean",
+      "label": "优先引用点到机器人的那条",
+      "description": "默认开。同一批消息里如果有 @/拍一拍机器人的消息，优先把它当作本来要回的那条，而不是最后一条。"
+    },
+    "minNewMessages": {
+      "type": "number",
+      "label": "被顶掉几条才引用",
+      "description": "默认 1。目标消息之后又来了几条新消息，才加引用；设 1 就是只要被顶了一条就引用。",
+      "min": 1,
+      "max": 20
+    },
+    "quoteMedia": {
+      "type": "boolean",
+      "label": "图片/表情也加引用",
+      "description": "默认关。开启后机器人发图/表情时也会引用原目标消息；一般只给文字回复加引用就够。"
+    },
+    "logChanges": {
+      "type": "boolean",
+      "label": "写日志",
+      "description": "默认关。开启后记录每次自动引用了哪条。"
+    }
+  }
+}

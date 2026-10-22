@@ -1,0 +1,8 @@
+long-memory 1.0.1
+Command: node --test dev-tests/memory.test.mjs
+Environment: Windows, Node v24.21.0
+30 tests passed, 0 failed.
+Includes bundled WASM initialization, SQLite disk persistence, host tool registration, conversation isolation, deletion, revision conflicts, failed disk writes.
+QQ Agent/Electron live integration: NOT tested.
+No actual chat data read or written; no external model/network requests in tests.
+

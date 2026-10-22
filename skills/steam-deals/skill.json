@@ -1,0 +1,169 @@
+{
+  "id": "steam-deals",
+  "name": "Steam 史低好价",
+  "version": "1.4.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "查 Steam 当前正在打折的热门游戏，标出**新史低 / 平史低**。支持按分类查（赛车/射击/角色扮演等 41 类，不指定就是全部类型），每次被 @ 都换一批，用评测数过滤冷门、按折扣到期时间掠过过期信息，再拿 IsThereAnyDeal 的历史最低价判定史低。输出为「序号. 中文译名（英文名） 原价→现价 平/新 -折扣%」一行一款，**每款下面紧跟这张游戏的封面图**，每 10 款一个气泡，结尾补一张二次元配图。价格可换算成任意国家货币。只有被 @ / 拍了拍才回复。",
+  "author": "为 QQ Agent 定制",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "_note_deps": [
+    "不需要额外装 Python 或别的技能，也不需要代理（Steam 官方接口本机直连可达）。",
+    "模块：steam-data.js（Steam+ITAD+汇率+分类）、game-names.js（中文译名）、pixiv-fetch.js（结尾配图）。",
+    "Steam 官方**不提供**历史最低价，所以史低只能靠 IsThereAnyDeal；需要在设置里填 ITAD API Key",
+    "（免费申请：https://isthereanydeal.com/apps/my/ ）。没有 key 时工具不会假装有史低。",
+    "分类筛选**必须用 tags 不能用 genre**：实测 genre=9（竞速）返回 total_count=8446、",
+    "前几名跟不传 genre 完全一样（等于没生效）；tags=699（竞速）才是真赛车（301 条）。",
+    "中文译名顺序：Steam 官中 → 核实过的社区词典 → DeepSeek。公共机翻质量不可接受",
+    "（实测 Steep→「陡峭」、The Outlast Trials→「长生不老的审判」）。",
+    "Steam 直连一段时间后会 403（限流），代码里已做「直连优先、403 自动切代理」。",
+    "「每次换一批」用的是候选偏移，按分类分别计数；偏移深度受 rotatePages 限制，",
+    "太深会翻出榜尾小品游戏（实测第 3 页开始混入 SimplePlanes 这类），所以默认只在前 100 名里轮转。",
+    "按 ITAD 条款要求，输出末尾固定带上「数据来源：Steam 商店 + IsThereAnyDeal.com」署名。"
+  ],
+  "settings": {
+    "enabled": true,
+    "mentionOnly": true,
+    "itadKey": "",
+    "currency": "CNY",
+    "maxItems": 10,
+    "perBubble": 10,
+    "pixivImage": true,
+    "rotatePages": 2,
+    "minReviews": 5000,
+    "maxCandidates": 70,
+    "searchPages": 2,
+    "showCover": true,
+    "showLink": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用 Steam 史低好价",
+      "description": "总开关。关掉后模型连工具都看不到。"
+    },
+    "mentionOnly": {
+      "type": "boolean",
+      "label": "群里只在被点名时给",
+      "description": "默认开。开着时群里必须 @ 机器人（或拍一拍它）才会查折扣，普通聊天不会自己冒出来；私聊不受影响。"
+    },
+    "itadKey": {
+      "type": "string",
+      "label": "ITAD API Key",
+      "description": "史低数据来自 IsThereAnyDeal，必须在 https://isthereanydeal.com/apps/my/ 免费申请一个 key 填这里。留空则只能列折扣、无法判定史低。"
+    },
+    "currency": {
+      "type": "string",
+      "label": "计价货币",
+      "description": "默认 CNY（人民币）。填国家名或币种代码都行：USD 美国、UAH 乌克兰、RUB 俄罗斯、JPY 日本、EUR 欧元…… 也可以直接在群里跟机器人说「换成乌克兰汇率」，它会自己改这一项。汇率每 6 小时刷新一次。"
+    },
+    "perBubble": {
+      "type": "number",
+      "label": "每个气泡放几款",
+      "description": "默认 10。每款占「一段文字 + 一张封面图」，攒够这个数就自动换下一个气泡。调小＝消息更碎、单个气泡更短；调大＝图片更集中（某些协议端对单条消息的图片数量有上限，太大可能发不出去）。"
+    },
+    "pixivImage": {
+      "type": "boolean",
+      "label": "结尾补一张二次元图",
+      "description": "默认开。全部清单发完后，从 Pixiv 随机取一张二次元插画作为收尾（单独一条消息）。代理、分级直接用 Pixiv 插件里已填好的设置，代理没开会自动拉起。取不到图时只记日志，清单照常发出。"
+    },
+    "showCover": {
+      "type": "boolean",
+      "label": "每款附游戏封面",
+      "description": "默认开。开启时每款游戏那一行的下面会紧跟这张游戏的官方封面图（460x215），与文字在同一个气泡里。关掉则只发文字，消息会短很多。同一款游戏重复查询会命中本地缓存，不会重复下载。"
+    },
+    "maxItems": {
+      "type": "number",
+      "label": "最多列几款",
+      "description": "默认 10。范围 5~20。"
+    },
+    "rotatePages": {
+      "type": "number",
+      "label": "每次换一批的轮转范围（页）",
+      "description": "默认 2，即每次 @ 都在「Steam 畅销榜前 100 名」里换一批。调大＝花样更多，但会翻到榜单尾部、混进不太出名的游戏（实测第 3 页开始出现 SimplePlanes 这类小品）。想每次都换得彻底就调到 3，想每批都最热门就调到 1。"
+    },
+    "minReviews": {
+      "type": "number",
+      "label": "冷门门槛（总评测数）",
+      "description": "默认 5000。低于这个评测数的游戏直接丢掉 —— 评测数是销量的最好代理，用来实现「忽略冷门游戏」。调高更严格，调到 0 等于不过滤。"
+    },
+    "maxCandidates": {
+      "type": "number",
+      "label": "每轮最多检查几款",
+      "description": "默认 70。候选池先按折扣力度粗排再截断，控制评测与价格的请求量。调大更全但更慢。"
+    },
+    "searchPages": {
+      "type": "number",
+      "label": "特惠列表翻页数",
+      "description": "默认 2（每页 50 条）。翻得越多候选越全，但耗时增加。"
+    },
+    "showLink": {
+      "type": "boolean",
+      "label": "附上 Steam 链接",
+      "description": "默认关。开启后每条后面加一行商店直达链接（消息会变长一些）。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "steam-deals-usage",
+        "title": "Steam 史低好价",
+        "priority": 40,
+        "content": "有人问 Steam 打折/史低好价/什么值得买时，调 `steam-deals__deals`。\n\n【它自己发消息】清单与配图由工具直接发出。调完**不要再调 send_message**、不要复述或改写内容，直接结束这一轮。\n\n【何时用】只有：私聊；或群里被 @ / 拍了拍且在问折扣。别人只是聊天就别用（工具会拒绝，别去撞）。\n\n【分类】用户点名某类就传 genre（「想玩赛车」→赛车、「有射击类的吗」→射击、「来点恐怖游戏」→恐怖）；没提分类就**不要传**（默认全部）。\n可用：竞速/赛车、射击、角色扮演、策略、模拟、动作、冒险、体育、独立、休闲、恐怖、解谜、开放世界、合作、动漫、生存、沙盒建造、Roguelike、视觉小说、平台跳跃、格斗、潜行、城市营造、农场模拟、魂类、卡牌构筑、音乐、钓鱼、桌游、武侠、太空、推理、赛博朋克、像素、派对、街机、弹幕射击、心理恐怖、MOBA、MMO。\n工具返回\"认不出分类\"时会给出清单，照着转告用户即可。\n\n【每次不重样】同分类连问出的游戏不会重复。用户说「再来一批」就直接再调一次，别解释、别说\"和刚才一样\"。\n\n【参数】count 默认 10（用户说\"多来点\"传 15~20，\"只要最猛的\"传 5）；currency 仅临时换货币显示（USD/UAH/RUB 或\"美元\"\"乌克兰\"）。\n\n【换货币设置】用户要求改设置时调 `steam-deals__currency`（currency 填目标货币；留空=查询当前设置）。改完告知当前货币即可，不用重发清单。\n\n【纪律】没被点名时当作没发生，别解释；工具报错（无 ITAD Key／汇率不通／分类认不出）时如实转达那一句，别说成\"没有好价\"；数据实时抓取，别当成长期固定结论。"
+      }
+    ]
+  },
+  "triggers": {
+    "when": "私聊里问到，或群里被 @ / 拍了拍之后问 Steam 近期折扣、史低好价、什么游戏值得买",
+    "examples": [
+      "Steam 最近有什么打折的",
+      "有没有史低好价",
+      "最近什么游戏值得买",
+      "Steam 折扣",
+      "@机器人 帮我看看 steam 打折",
+      "有什么便宜的好游戏"
+    ]
+  },
+  "_note_tools_is_metadata": "上游把 tools[] 当说明性元数据读，不会自动注册；真正的注册在 index.js 的 api.registerTool。id 写 'deals'，上游自动加 'steam-deals__' 前缀 ⇒ 模型看到的是 steam-deals__deals。",
+  "tools": [
+    {
+      "id": "deals",
+      "name": "查 Steam 史低好价",
+      "description": "查 Steam 打折热门游戏并标出新史低/平史低（含分类筛选、中文译名、货币换算、每款封面图），结果由工具自己发送。被问\"Steam 最近有什么打折的/有没有史低好价\"时调用。调完不要再调 send_message。",
+      "category": "utility",
+      "icon": "🎮",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "要列几款，5~30，默认按用户设置（一般 10）。"
+          },
+          "currency": {
+            "type": "string",
+            "description": "临时按指定货币换算，如 USD / UAH / RUB / 美元 / 乌克兰。留空则用用户设置里的默认货币。"
+          }
+        }
+      }
+    },
+    {
+      "id": "currency",
+      "name": "设置计价货币",
+      "description": "把 Steam 折扣的计价货币换成指定国家/币种（乌克兰/UAH、美国/USD、俄罗斯/RUB 等），改了之后一直生效",
+      "category": "utility",
+      "icon": "💱",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "目标货币：国家名或币种都行。留空则只查询当前设置，不修改。"
+          }
+        }
+      }
+    }
+  ]
+}

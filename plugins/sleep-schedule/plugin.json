@@ -1,0 +1,112 @@
+{
+  "id": "sleep-schedule",
+  "name": "睡觉时间",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "entry": "index.js",
+  "author": "为 QQ Agent 定制",
+  "description": "到点自动睡觉：睡觉时段里机器人不回任何消息（群聊、私聊都算），消息照常存档、不会丢，醒了接着看。\n\n【两段式，不是一刀切】刚进入睡觉时段的「道别窗口」内（默认 10 分钟），如果它正好在跟人聊天，会用自己的口气说一句困了、先去睡了，然后才彻底安静 —— 不然到点突然消失会很突兀。窗口过了、或根本没人在聊，就直接一声不吭地睡。\n\n【为什么不烧钱】判定走核心的 chat.ban-state 能力：睡觉时核心**在建会话之前**就返回了，根本不调用模型 —— 这不是「让模型决定不说话」，是它压根没被叫醒，所以睡觉期间是 0 token。\n\n【怎么醒】只按时间。到醒点自动恢复正常，不需要任何操作。",
+  "enabledByDefault": true,
+  "capabilities": [
+    "chat.ban-state",
+    "status.sleep-schedule"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "sleepStart": "23:00",
+    "sleepEnd": "07:00",
+    "graceMinutes": 10,
+    "privateGraceMinutes": 30,
+    "ownerCallable": true,
+    "sleepTalk": true,
+    "sleepTalkTypoChance": 25,
+    "minGapMinutes": 15,
+    "goodnight": true,
+    "jitterMinutes": 60,
+    "blockSendTools": true,
+    "chatKeys": ""
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "group": "总开关",
+      "label": "启用睡觉时间",
+      "description": "关掉后机器人 24 小时在线，到点也不会睡。"
+    },
+    "sleepStart": {
+      "type": "string",
+      "group": "总开关",
+      "label": "几点睡（HH:MM）",
+      "description": "24 小时制，例如 23:00。填得比醒点晚表示跨午夜（23:00 → 07:00 就是跨夜的，正常）。"
+    },
+    "sleepEnd": {
+      "type": "string",
+      "group": "总开关",
+      "label": "几点醒（HH:MM）",
+      "description": "24 小时制，例如 07:00。到这个点自动恢复回话。"
+    },
+    "graceMinutes": {
+      "type": "number",
+      "group": "道别",
+      "label": "睡前道别窗口（分钟）",
+      "description": "默认 10。刚睡着的前这么多分钟里，如果它正好在跟人聊天，允许它说一句「困了，先去睡了」；说完或窗口过了就彻底静默。填 0 = 完全不道别，到点直接消失。"
+    },
+    "minGapMinutes": {
+      "type": "number",
+      "group": "道别",
+      "label": "多久没人理就不道别（分钟）",
+      "description": "默认 15。群里最后一条消息如果已经是 15 分钟前的了，说明没人在聊，它就直接睡，不冒出来说困了（否则凌晨三点突然来一句「我先睡了」会很怪）。"
+    },
+    "privateGraceMinutes": {
+      "type": "number",
+      "group": "道别",
+      "label": "私聊「刚睡着」窗口（分钟）",
+      "description": "默认 30。私聊没有零成本的硬闸（核心只对群聊问「能不能发消息」），所以私聊只要被叫醒就必然花一次调用。设宽一点 = 刚睡下这段时间还能迷迷糊糊回你几句；设 0 = 一过群里的道别窗口就彻底不回。注意：这个窗口越宽，夜里私聊花的钱越多，而且这部分成本压不下去（提示词由核心组装，插件无权裁剪）。"
+    },
+    "ownerCallable": {
+      "type": "boolean",
+      "group": "道别",
+      "label": "主人随时可以把它叫醒",
+      "description": "开（默认）：主人（在「插件 → 主人识别」里配的 QQ 号）说话时不受睡觉限制，会正常回你 —— 半夜有事也能把它薅起来。别人一律睡死。关掉则它对你和别人一样睡。判定只用 QQ 号，跟主人识别插件同一口径。注意：叫醒只有 1 分钟余温（群里核心不告诉我们「谁在说话」，只能用「主人刚开口过」近似），这 1 分钟是刻意收窄的 —— 设成 4 分钟时实测主人一开口，别人紧接着的消息也全被放行了。"
+    },
+    "sleepTalk": {
+      "type": "boolean",
+      "group": "道别",
+      "label": "睡着时说话迷迷糊糊",
+      "description": "开（默认）：刚睡下那阵子如果还在说话，句子会特别短、带错别字、可能说胡话（提示词引导 + 发送前真的改几个字）。只在「刚睡下、还没睡死」这段生效；睡熟之后一个字都不发，主人把它叫醒时也是正常说话，不会装迷糊。"
+    },
+    "sleepTalkTypoChance": {
+      "type": "number",
+      "group": "道别",
+      "label": "迷糊时手滑概率（%）",
+      "description": "默认 25。每条要说的话有多大比例被改出错别字（只动 2~30 个字的短句，长句不碰）。设 0 = 句子短、够困，但不错字；设太高会让人看不懂。"
+    },
+    "goodnight": {
+      "type": "boolean",
+      "group": "道别",
+      "label": "允许它用自己的口气道别",
+      "description": "开（默认）：那句话由模型按人设自己说，语气自然，但会消耗一次模型调用。关掉：到点直接静默，一个字都不发。"
+    },
+    "jitterMinutes": {
+      "type": "number",
+      "group": "拟人",
+      "label": "每天浮动范围（分钟）",
+      "description": "默认 60。每天在这个范围内随机提前或推后睡觉/起床时间，看起来更像真人而不是定时任务。填 0 = 每天精确同一时刻。"
+    },
+    "blockSendTools": {
+      "type": "boolean",
+      "group": "兜底",
+      "label": "睡觉时硬拦发送类工具",
+      "description": "开（默认）：睡觉时段内，就算模型因为别的原因被叫醒（比如别的扩展触发了），任何发送消息的工具都会被直接拒绝 —— 双保险，确保它真的一个字都发不出去。"
+    },
+    "chatKeys": {
+      "type": "string",
+      "group": "范围",
+      "label": "只管这几个会话（可留空）",
+      "description": "留空 = 所有群和私聊都睡（推荐）。想只让它在某些群睡觉，就填 group:群号，多个用逗号隔开，例如 group:123,group:456。"
+    }
+  },
+  "prompt": null
+}

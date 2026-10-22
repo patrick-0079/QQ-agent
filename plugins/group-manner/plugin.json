@@ -1,0 +1,91 @@
+{
+  "id": "group-manner",
+  "name": "群聊分寸（别句句都接）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "让群里的她像真人一样有分寸：不再句句都接，只在被叫到、或者真感兴趣时才开口；别人互相说话（尤其是有明确对象的话，比如 @ 了谁、回复了谁、点名问谁）默认不插嘴；没什么可说的时候安静待着是允许的。插话概率按兴趣加权（命中她关心的话题、是问句、带情绪都会提高），而不是纯随机。同时给出「像真人说话」的口径：短、口语、有情绪、不客服腔、不复读。私聊不受影响。纯插件实现，不需要改内核。",
+  "author": "本机定制",
+  "enabledByDefault": true,
+  "capabilities": ["status.group-manner"],
+  "requires": [],
+  "permissions": [],
+  "settings": {
+    "enabled": true,
+    "onlyGroups": true,
+    "quietIfNotAddressed": true,
+    "interjectChance": 0.15,
+    "interestKeywords": "小鱼\n鲸鱼\n画画\n代码\nbug\n游戏\n吃\n好吃\n睡\n累\n可爱\n喜欢",
+    "questionBonus": 20,
+    "emotionBonus": 15,
+    "interestBonus": 35,
+    "mannerPrompt": "",
+    "minGapSeconds": 45,
+    "onlyOwner": false,
+    "targets": ""
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用群聊分寸",
+      "description": "默认开。关掉后群里恢复原样（内核分档怎么定就怎么来）。"
+    },
+    "onlyGroups": {
+      "type": "boolean",
+      "label": "只管群聊",
+      "description": "默认开。私聊里她说每句都是对的，不该套群里的分寸；关掉后私聊也会被这套规则影响（不建议）。"
+    },
+    "quietIfNotAddressed": {
+      "type": "boolean",
+      "label": "没被叫到就别接",
+      "description": "默认开。别人相互聊天、或有明确说话对象（@ 了别人 / 回复别人 / 点名问某人）时，默认不插嘴。"
+    },
+    "interjectChance": {
+      "type": "number",
+      "label": "搭腔基础概率（%）",
+      "description": "默认 15。别人在聊、没人叫她时，她偶尔会想搭一句 —— 这是那个「偶尔」的基准值，再由下面的兴趣/问句/情绪加成往上抬。"
+    },
+    "interestKeywords": {
+      "type": "string",
+      "label": "她感兴趣的话题词（一行一个）",
+      "description": "命中这些词会显著提高她插话的意愿。写你希望她主动参与的话题。",
+      "multiline": true
+    },
+    "questionBonus": {
+      "type": "number",
+      "label": "是问句时的加成（%）",
+      "description": "默认 20。群里有人抛问题（带？/吗/怎么/为什么）时，她更愿意接。"
+    },
+    "emotionBonus": {
+      "type": "number",
+      "label": "带情绪时的加成（%）",
+      "description": "默认 15。有人哈哈笑、吐槽、抱怨、激动 —— 这种话题更容易让人想插一句。"
+    },
+    "interestBonus": {
+      "type": "number",
+      "label": "命中兴趣词的加成（%）",
+      "description": "默认 35。"
+    },
+    "mannerPrompt": {
+      "type": "string",
+      "label": "说话方式补充（留空用内置的）",
+      "description": "留空时用内置的「像真人说话」口径（短、口语、有情绪、不客服腔、不复读、允许不接）。想加自己的要求写在这里，会拼在内置口径后面。",
+      "multiline": true
+    },
+    "minGapSeconds": {
+      "type": "number",
+      "label": "两次主动搭腔的最短间隔（秒）",
+      "description": "默认 45。防止她在别人聊天时连续插话。被叫到（@ 她 / 回复她）不受这个限制。"
+    },
+    "onlyOwner": {
+      "type": "boolean",
+      "label": "只管主人的群",
+      "description": "默认关。打开后只对主人所在的会话生效。"
+    },
+    "targets": {
+      "type": "string",
+      "label": "只对这些 QQ 生效（可选）",
+      "description": "留空 = 所有会话。多个用逗号分隔。"
+    }
+  }
+}

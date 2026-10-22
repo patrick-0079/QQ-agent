@@ -1,0 +1,127 @@
+{
+  "名称": "Token 配额守卫（quota-guard）",
+  "版本": "1.0.0",
+  "打包时间": "2026/10/10 19:07:54",
+  "包结构说明": "压缩包里只有一个顶层目录 quota-guard/，plugin.json 位于它的根层 —— 主程序的 readManifest 就是在这一层找 plugin.json，多一层就装不上。路径全部用正斜杠，且不含目录条目（主程序的解压器靠 endsWith(\"/\") 跳过目录，PowerShell 的 Compress-Archive 写反斜杠会导致安装失败）。",
+  "警告": "本插件不是自包含的：必须同时安装 _安装/core-patches/src 里的两个核心文件，否则整个插件失效。详见 _安装/安装说明.md。",
+  "安装目标": {
+    "插件": "<QQ Agent 安装目录>\\resources\\app\\plugins\\quota-guard\\",
+    "核心补丁": "<QQ Agent 安装目录>\\resources\\app\\src\\（覆盖 sender.js 与 orchestrator.js）"
+  },
+  "核心补丁改了什么": [
+    "src/sender.js：新增只读方法 canSend(chatKey)（查当前还能不能发；只读不占额度）",
+    "src/orchestrator.js：把 sendState 与 sessionId 交给 chat.quota-gate",
+    "src/orchestrator.js：按 decision.code 区分日志（发送限流前置 / Skill 拦截）"
+  ],
+  "近期修复": [
+    "今日用量与当前余额拆成两个独立计数器：重置只重置余额，只有余额决定拦不拦",
+    "拦截计数：整轮被跳过时也计入\"被拦\"（此前不计数）",
+    "定时刷新不再打断正在编辑的输入框"
+  ],
+  "不含": [
+    "任何人的额度设置（在 config.json 里）",
+    "任何人的用量账本（ledger.json / cumulative.json）"
+  ],
+  "文件": [
+    {
+      "rel": "quota-guard/_安装/安装说明.md",
+      "size": 10446,
+      "sha256": "b74819000b8221df8a42d2b987f43589a59b34438a386cf7ec911e0e60afef02"
+    },
+    {
+      "rel": "quota-guard/_安装/core-patches/src/orchestrator.js",
+      "size": 112143,
+      "sha256": "852cc493c2be71cd637fb2264ac93decdf9accb1383b19353ed8d114c1bd7cfd"
+    },
+    {
+      "rel": "quota-guard/_安装/core-patches/src/sender.js",
+      "size": 24026,
+      "sha256": "7501a4df25686fbe16a2219fea07fe67027fbfe7542deff29945538e6c06d286"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-blocking.mjs",
+      "size": 9259,
+      "sha256": "439e17fdcd44e4f89783b8d7e4052561bf1750b9e5552d1207b3abbd677db7b9"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-cleanroom.mjs",
+      "size": 10277,
+      "sha256": "4c05f8980f52807117a280c14d85158be712688ff31f33e225b818b75b9f7df0"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-install.mjs",
+      "size": 5859,
+      "sha256": "e08288b35c5d6f931f771081de2e091fe21ca15f115ec8bd0e93bdbd15f9ea37"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-quota-guard.mjs",
+      "size": 14629,
+      "sha256": "83fb2cd0b05577a11cd0b70bc84b7797aca6c5048a2a80471cc982340dcf222e"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-quota-ui.mjs",
+      "size": 62431,
+      "sha256": "93b8cd3559e55de0642aef4b1e93d63944be4bef0e71baaab00efbdf98a73a2f"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-refresh.mjs",
+      "size": 8437,
+      "sha256": "2742f1ebaf6d03d97b8cd217b92e4fe2a6e3bbd508c5d28eef079cd5c36dd91e"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-reset.mjs",
+      "size": 6986,
+      "sha256": "0222cfb52cfc40b3f328c16bacf9b614934628c8cbe3d89df80dca357dfbe8ac"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-sendgate.mjs",
+      "size": 8651,
+      "sha256": "eea161bfa9eca1a94b62b2ffbf69215648d29f8136648558e8aeaaa5a35e4a5f"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-single-reset.mjs",
+      "size": 6572,
+      "sha256": "d44dcdb1b6da1a2d8cc01835233cde73502aec091cb2c07c3291899e7c191c94"
+    },
+    {
+      "rel": "quota-guard/_安装/dev-tests/verify-two-counters.mjs",
+      "size": 7034,
+      "sha256": "bc17639b9e714fbbf208938c19d83ae7888061400047c915b6bb2fe0df1b6af2"
+    },
+    {
+      "rel": "quota-guard/index.js",
+      "size": 70231,
+      "sha256": "7cff348a447a9d71135d396f5d108f2f3c9a98039f458a6a9ca961eef7e3415d"
+    },
+    {
+      "rel": "quota-guard/INSTALL.md",
+      "size": 5039,
+      "sha256": "ef92f97fb5885db7ed1dcffd09ff05dc704639f858376324155823e6e492b6a9"
+    },
+    {
+      "rel": "quota-guard/plugin.json",
+      "size": 1492,
+      "sha256": "a2346321b318c4da4d62e125642441626d9109adb448ff804be5b5df1e27bf4e"
+    },
+    {
+      "rel": "quota-guard/README.md",
+      "size": 15085,
+      "sha256": "2f15e2fc17aeb88f76150778b12ea78a470965c23f19e2c89c471a25ec043403"
+    },
+    {
+      "rel": "quota-guard/ui/app.js",
+      "size": 67800,
+      "sha256": "2d927a326a9e6cd261229831e50c2c9d60c3d2e5c90e6affdcc2476fc50f0b08"
+    },
+    {
+      "rel": "quota-guard/ui/index.html",
+      "size": 11446,
+      "sha256": "6d22e8ac17b08193e0c7161f3d2723ec6bcab57229044af539e19fa301631fd5"
+    },
+    {
+      "rel": "quota-guard/ui/style.css",
+      "size": 18070,
+      "sha256": "c1baa820ee6735baf16bf75ccc73f7f489a4bac6ba6f73d2afc931b3d9e29c12"
+    }
+  ]
+}

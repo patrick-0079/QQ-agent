@@ -1,0 +1,108 @@
+{
+  "id": "mimo-tts",
+  "name": "MiMo 语音说话",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "让机器人真的开口：把一句话用小米 MiMo 的语音合成变成语音消息发到当前会话，而不是打字。音色不是写死的预设，而是一段可以随时改的文字描述（默认按小肥鱼的设定），模型还能针对单独一句临时调整语气。什么时候该说话由模型自己判断。",
+  "author": "QQ Agent",
+  "enabledByDefault": false,
+  "permissions": [
+    "web_fetch"
+  ],
+  "settings": {
+    "baseUrl": "https://api.xiaomimimo.com/v1",
+    "apiKey": "",
+    "model": "mimo-v2.5-tts-voicedesign",
+    "voicePrompt": "",
+    "presetVoice": "冰糖",
+    "audioFormat": "mp3",
+    "maxChars": 120,
+    "polishText": false,
+    "alsoSendText": false,
+    "timeoutMs": 60000
+  },
+  "configSchema": {
+    "baseUrl": {
+      "type": "string",
+      "label": "接口地址",
+      "description": "默认 https://api.xiaomimimo.com/v1（官方地址）。填中转/套餐地址（如 token-plan-cn.xiaomimimo.com）时若报 404，说明那个地址不提供音频模型，改回官方地址即可。"
+    },
+    "apiKey": {
+      "type": "string",
+      "label": "MiMo API Key（必填）",
+      "secret": true,
+      "description": "和语音转文字可以用同一个 Key。留空 = 本技能不可用，模型看不到说话工具。"
+    },
+    "model": {
+      "type": "enum",
+      "label": "合成方式",
+      "values": [
+        "mimo-v2.5-tts-voicedesign",
+        "mimo-v2.5-tts"
+      ],
+      "description": "voicedesign = 用下面的「音色描述」现场生成音色（推荐，可随意校准）；mimo-v2.5-tts = 用内置固定音色（下面那项选）。"
+    },
+    "voicePrompt": {
+      "type": "string",
+      "multiline": true,
+      "label": "音色描述（一般不用填）",
+      "description": "留空 = 用技能目录里的 voice.txt（推荐：那个文件改起来方便）。想临时试一套新音色时才填这里，填了就覆盖 voice.txt。仅「音色设计」模式生效。"
+    },
+    "presetVoice": {
+      "type": "enum",
+      "label": "内置音色",
+      "values": [
+        "mimo_default",
+        "冰糖",
+        "茉莉",
+        "苏打",
+        "白桦",
+        "Mia",
+        "Chloe",
+        "Milo",
+        "Dean"
+      ],
+      "description": "仅当「合成方式」选 mimo-v2.5-tts 时生效。冰糖/茉莉 = 中文女声，苏打/白桦 = 中文男声，Mia/Chloe = 英文女声，Milo/Dean = 英文男声。"
+    },
+    "audioFormat": {
+      "type": "enum",
+      "label": "语音格式",
+      "values": [
+        "mp3",
+        "wav"
+      ],
+      "description": "默认 mp3（体积小，发得快）。两者都会由协议端自动转成 QQ 要的 silk 再上传，一般不用改。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "单条语音字数上限",
+      "description": "默认 120。超了直接拒发并让模型拆成短句——QQ 语音太长会被拒收，也容易读出念稿感。"
+    },
+    "polishText": {
+      "type": "boolean",
+      "label": "让 MiMo 先润色文本再念",
+      "description": "默认关。关闭时念的就是模型原话（推荐，符合说话像打字的风格）。打开后 MiMo 会改写要念的文字，可能跟原话不一样。"
+    },
+    "alsoSendText": {
+      "type": "boolean",
+      "label": "语音之外再补一条文字",
+      "description": "默认关（只发语音）。打开后同一条内容会先发语音、再发一条文字，方便听不了语音的人。"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "单条合成超时（毫秒）",
+      "description": "默认 60000。超时就放弃这条语音并把原因告诉模型，不会卡住整轮对话。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "mimo-tts-note",
+        "title": "开口说话",
+        "priority": 36,
+        "content": "你有一个 mimo-tts__say 工具，可以把一句话用自己的声音**说出来**（真语音消息），而不是打字。只在这些情况用：用户明确要你用语音（「用语音回我」「说句话」「念一下」「唱一段」），或语音明显比文字更合适（对方发语音给你、要表达语气情绪、要报晚安这类短话）。其余情况照常打字——语音比文字慢也更贵，别为了好玩刷语音，也不要每条回复都说话。say 一次只适合一句短话（一两句、60 字内最佳），话多就分几次调用或改回打字。发完语音不要再把同一句话用文字发一遍，也不要汇报「已发送」。"
+      }
+    ]
+  }
+}

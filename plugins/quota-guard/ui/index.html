@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Token 配额守卫 · 控制台</title>
+  <!-- CSP 由程序下发（script-src 'self'），所以脚本一律外链、不用内联事件 -->
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/plugin-ui/quota-guard/style.css" />
+  <script src="/plugin-ui/quota-guard/app.js" defer></script>
+</head>
+<body class="qg-body">
+
+<header class="qg-top">
+  <div class="qg-top-in">
+    <div class="qg-brand">
+      <span class="qg-logo">🧮</span>
+      <div>
+        <div class="qg-title">Token 配额守卫</div>
+        <div class="qg-sub" id="qg-sub">正在载入…</div>
+      </div>
+    </div>
+    <div class="qg-top-actions">
+      <span class="qg-badge" id="qg-state">—</span>
+      <label class="switch qg-master-switch" id="qg-enable-wrap" title="关掉后本插件完全不工作：不记账、不拦人、不改任何行为">
+        <input type="checkbox" id="qg-enable" />
+        <span class="track"><span class="thumb"></span></span>
+        <span class="qg-switch-label" id="qg-enable-label">待命</span>
+      </label>
+      <button class="btn btn-small" id="qg-refresh" type="button">刷新</button>
+    </div>
+  </div>
+</header>
+
+<div class="qg-note" id="qg-note" hidden></div>
+
+<main class="qg-wrap">
+
+  <!-- ── 全局设置（折叠）────────────────────────────────────────────── -->
+  <section class="qg-card qg-collapsed" id="qg-settings-card">
+    <div class="qg-card-head qg-clickable" id="qg-settings-toggle">
+      <h2>⚙ 全局设置</h2>
+      <span class="qg-muted" id="qg-settings-summary"></span>
+      <span class="qg-chev">›</span>
+    </div>
+    <div class="qg-collapse" id="qg-settings-body">
+      <div class="qg-form">
+        <div class="qg-form-grid">
+          <label class="qg-field">
+            <span>每日重置时间（0-23 点）</span>
+            <input type="number" id="qg-resethour" min="0" max="23" step="1" />
+            <em>额度周期 = 该时刻到次日该时刻。填 4 = 每天凌晨 4 点刷新。凌晨 3 点发的消息仍算前一天。</em>
+          </label>
+          <label class="qg-field">
+            <span>默认每日额度（token，可用 k 简写：50k = 50000）</span>
+            <input type="text" inputmode="decimal" id="qg-defaultlimit" placeholder="0 = 不限" />
+            <em>没有单独设额度的人用这个值。保持 0 → 谁都不限，功能等于待命（但仍会记账）。</em>
+          </label>
+        </div>
+        <label class="qg-field qg-inline">
+          <input type="checkbox" id="qg-notify" />
+          <span>额度用尽时回一句话</span>
+        </label>
+        <label class="qg-field qg-inline">
+          <input type="checkbox" id="qg-sendgate" />
+          <span>发送限流前置（推荐开）</span>
+          <span class="qg-hint" style="margin:0">分钟 / 小时发送额度用尽时，<b>在请求模型之前</b>就结束这一轮 ——
+            否则模型会把话想完，再被发送限流挡回来，那次 token 是白花的。</span>
+        </label>
+        <label class="qg-field">
+          <span>提示文本</span>
+          <input type="text" id="qg-notifytext" maxlength="200" />
+          <em>由核心的发送队列发出，不调用模型，因此不消耗 token。</em>
+        </label>
+        <div class="qg-form-actions">
+          <button class="btn btn-primary btn-small" id="qg-save" type="button">保存设置</button>
+          <button class="btn btn-small" id="qg-resetall" type="button">清空今天所有人的用量</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 分页签：今日额度 / 总用量排行榜 ─────────────────────────────── -->
+  <div class="qg-tabs" id="qg-pages">
+    <button class="qg-page-tab is-on" data-page="daily" type="button">今日额度</button>
+    <button class="qg-page-tab" data-page="total" type="button">总用量排行榜</button>
+  </div>
+
+  <!-- ══ 页签一：额度管理（主从布局）══════════════════════════════════ -->
+  <section class="qg-card qg-page" id="qg-page-daily">
+    <div class="qg-card-head">
+      <h2>额度管理</h2>
+      <span class="qg-muted" id="qg-total"></span>
+    </div>
+    <p class="qg-hint" id="qg-nextreset"></p>
+    <p class="qg-hint qg-warnhint" id="qg-today-source" hidden></p>
+
+    <div class="qg-stats" id="qg-stats"></div>
+
+    <div class="qg-toolbar">
+      <input class="qg-input qg-search" id="qg-search" type="search" placeholder="搜索 QQ 号或昵称…" />
+      <select class="qg-select" id="qg-filter">
+        <option value="all">全部</option>
+        <option value="active">今天活跃</option>
+        <option value="capped">已设额度</option>
+        <option value="nocap">未设额度</option>
+        <option value="over">已超额</option>
+      </select>
+      <select class="qg-select" id="qg-sort">
+        <option value="used">按用量排</option>
+        <option value="remaining">按剩余排</option>
+        <option value="name">按昵称排</option>
+      </select>
+      <div class="qg-toolbar-right">
+        <button class="btn btn-small" id="qg-add-person" type="button">＋ 添加人</button>
+        <button class="btn btn-small" id="qg-batch" type="button" disabled>批量设额度</button>
+      </div>    </div>
+
+    <!-- 添加人：从群成员 / 好友列表挑，或手填 QQ 号 -->
+    <div class="qg-addbox" id="qg-addbox" hidden>
+      <div class="qg-addtabs">
+        <button class="qg-tab is-on" data-addtab="members" type="button">从群成员选</button>
+        <button class="qg-tab" data-addtab="friends" type="button">从好友选</button>
+        <button class="qg-tab" data-addtab="manual" type="button">手填 QQ 号</button>
+      </div>
+
+      <!-- 群成员 -->
+      <div class="qg-addpane" id="qg-pane-members">
+        <div class="qg-row">
+          <select class="qg-select" id="qg-group-select"><option value="">选择群聊…</option></select>
+          <input class="qg-input qg-search" id="qg-member-search" type="search" placeholder="在成员里搜昵称或 QQ 号…" />
+          <button class="btn btn-small" id="qg-members-load" type="button">拉取成员</button>
+        </div>
+        <div class="qg-picker" id="qg-members" hidden></div>
+      </div>
+
+      <!-- 好友 -->
+      <div class="qg-addpane" id="qg-pane-friends" hidden>
+        <div class="qg-row">
+          <button class="btn btn-small" id="qg-friends-load" type="button">拉取好友列表</button>
+          <input class="qg-input qg-search" id="qg-friend-search" type="search" placeholder="在好友里搜…" />
+        </div>
+        <div class="qg-picker" id="qg-friends" hidden></div>
+      </div>
+
+      <!-- 手填 -->
+      <div class="qg-addpane" id="qg-pane-manual" hidden>
+        <div class="qg-row">
+          <input class="qg-input qg-input-num" id="qg-add-qq" type="text" inputmode="numeric" placeholder="QQ 号（4~12 位）" />
+          <input class="qg-input" id="qg-add-name" type="text" maxlength="40" placeholder="备注（可留空）" />
+          <input class="qg-input qg-input-num" id="qg-add-limit" type="text" inputmode="decimal" placeholder="每日额度，如 50k" />
+          <button class="btn btn-small btn-primary" id="qg-add-confirm" type="button">添加</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="qg-master">
+      <!-- 左：人员列表 -->
+      <div class="qg-listpane">
+        <div class="qg-listhead">
+          <label class="qg-check"><input type="checkbox" id="qg-checkall" /><span>全选</span></label>
+          <span class="qg-muted" id="qg-listcount"></span>
+        </div>
+        <div class="qg-list" id="qg-list"></div>
+        <div class="qg-empty" id="qg-empty" hidden></div>
+      </div>
+
+      <!-- 右：选中的人（单人管理） -->
+      <div class="qg-detailpane" id="qg-detail">
+        <div class="qg-detail-empty" id="qg-detail-empty">
+          从左边选一个人，这里就能单独管他的额度。
+          <div class="qg-muted">没出现过的人也能设 —— 点右上角「＋ 添加人」。</div>
+        </div>
+        <div class="qg-detail-body" id="qg-detail-body" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 页签二：总用量排行榜 ═════════════════════════════════════════ -->
+  <section class="qg-card qg-page" id="qg-page-total" hidden>
+    <div class="qg-card-head">
+      <h2>总用量排行榜</h2>
+      <span class="qg-muted" id="qg-cum-status"></span>
+      <div class="qg-toolbar-right">
+        <button class="btn btn-small" id="qg-cum-rebuild" type="button">重新统计</button>
+      </div>
+    </div>
+    <p class="qg-hint">
+      累计消耗来自<b>会话存档</b>（data/sessions/），按每轮各人的发言条数分摊 ——
+      与即时记账同一套口径。所以这个榜覆盖<b>全部历史</b>，不是从插件装好那天才开始。
+    </p>
+
+    <div class="qg-stats" id="qg-cum-stats"></div>
+    <p class="qg-hint" id="qg-cum-range"></p>
+
+    <div class="qg-toolbar">
+      <input class="qg-input qg-search" id="qg-cum-search" type="search" placeholder="搜索 QQ 号或昵称…" />
+      <select class="qg-select" id="qg-cum-sort">
+        <option value="tokens">按总用量排</option>
+        <option value="share">按占比排</option>
+        <option value="sessions">按参与会话排</option>
+        <option value="messages">按发言条数排</option>
+        <option value="name">按昵称排</option>
+      </select>
+      <span class="qg-muted" id="qg-cum-count"></span>
+    </div>
+
+    <div class="qg-tablewrap">
+      <table class="qg-table qg-cumtable">
+        <thead>
+          <tr>
+            <th class="qg-c-rank">名次</th>
+            <th>QQ 号</th>
+            <th>昵称</th>
+            <th class="qg-num">累计 token</th>
+            <th class="qg-c-share">占比</th>
+            <th class="qg-num">参与会话</th>
+            <th class="qg-num">发言条数</th>
+            <th class="qg-num">今日</th>
+            <th class="qg-c-act">操作</th>
+          </tr>
+        </thead>
+        <tbody id="qg-cum-rows"></tbody>
+      </table>
+    </div>
+    <div class="qg-empty" id="qg-cum-empty" hidden></div>
+  </section>
+
+</main>
+
+<!-- 批量设额度 -->
+<div class="qg-modal" id="qg-modal" hidden>
+  <div class="qg-modalbox">
+    <h3 id="qg-modal-title">批量设额度</h3>
+    <p class="qg-hint" id="qg-modal-hint"></p>
+    <label class="qg-field">
+      <span>每日额度（token，可用 k 简写：50k = 50000）</span>
+      <input type="text" inputmode="decimal" id="qg-modal-limit" placeholder="0 = 不限" />
+    </label>
+    <div class="qg-quick" id="qg-modal-quick"></div>
+    <div class="qg-form-actions">
+      <button class="btn btn-small btn-primary" id="qg-modal-ok" type="button">确定</button>
+      <button class="btn btn-small" id="qg-modal-cancel" type="button">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="qg-toast" id="qg-toast" hidden></div>
+</body>
+</html>

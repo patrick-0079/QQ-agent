@@ -1,0 +1,53 @@
+{
+  "id": "deai-flavor",
+  "name": "去除 AI 味",
+  "version": "1.0.1",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "检查一段话里有没有 AI 腔：禁用词 / 套路句式 / 滥用标点做硬扫描，再按四层自检（L1 硬规则 → L2 风格 → L3 内容 → L4 活人感）给出 AI 味程度（轻/中/重）和逐处修改方向。发长文前自己先过一遍，改完可再复检对比命中数。",
+  "author": "小肥鱼",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "permissions": [],
+  "settings": {
+    "strictness": "normal",
+    "extraBanned": "",
+    "showChecklist": true,
+    "maxChars": 4000
+  },
+  "configSchema": {
+    "strictness": {
+      "type": "enum",
+      "label": "判定严格度",
+      "values": ["loose", "normal", "strict"],
+      "description": "loose = 只有明显硬伤才报警（适合群聊短句、随口的吐槽）；normal = 默认，按命中数和密度分级；strict = 一点书面腔就报中度（适合公众号/长文/正式稿）。"
+    },
+    "extraBanned": {
+      "type": "string",
+      "label": "额外的禁用词",
+      "description": "你想拉黑的词自己加在这里，多个词用逗号、空格或换行分开。它们和内置禁用词一样按「命中即硬伤」处理。比如填：家人们, 绝绝子, 栓Q",
+      "multiline": true
+    },
+    "showChecklist": {
+      "type": "boolean",
+      "label": "附带 L2/L3/L4 自检提示",
+      "description": "开启后，除了硬伤清单，还会给出句长节奏、空洞大词、活人感终审的提示（建议开）。关掉只返回硬伤，省 token。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "单次检查字数上限",
+      "description": "默认 4000 字。超过就只检查前 4000 字，避免把长文档整个塞进模型上下文。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "deai-flavor-rules",
+        "title": "去 AI 味",
+        "content": "【去 AI 味】你在群里说话要像个人，不像客服，也不像写作助手。\n- 硬禁（出现就是失败）：不是…而是…／首先…其次…最后／综上所述／值得注意的是／赋能·闭环·抓手·底层逻辑／猛地·狠狠·仿佛·瞬间·稳稳这类堆叠副词／破折号连用。\n- 长度超过两行的话，先问自己一句：里面有具体的人、事、数字吗？没有就删到有。\n- 长短句交错，短句优先；一句话能说清就不写两句。\n- 自己拿不准时，把草稿丢给 deai-flavor__deai_check 过一遍，按它给的三步改完再发。",
+        "priority": 60
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "skills": {
+    "steam-query": {
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "countryCode": "cn",
+        "language": "schinese",
+        "timeoutMs": 10000,
+        "retries": 3,
+        "maxPerMinute": 8,
+        "showReviews": true,
+        "renderCard": true,
+        "watchList": "",
+        "broadcastTime": "",
+        "broadcastTargets": "",
+        "minDiscountPercent": 25,
+        "apiKey": "",
+        "playWatchEnabled": true,
+        "playWatchIntervalMin": 30,
+        "playWatchTargets": "",
+        "theme": "dark"
+      }
+    }
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "id": "daily-fortune",
+  "name": "每日运势",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "给群里的人抽一支每日签：等级（大吉/吉/中吉/小吉/末吉/平/小凶）+ 综合分 + 宜 + 忌 + 幸运色/幸运数字/幸运方位 + 一句话。同一天同一个人结果稳定（问两次不会变），第二天自动换新。会顺带给出一个**配图关键词**，由模型接着调 pixiv-search 技能从 P 站拉一张合气氛的二次元图一起发出去。只在**私聊**或**被 @ / 拍了拍**时给，群里随便聊天不会自己冒出来。",
+  "author": "为 QQ Agent 定制",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "_note_switch": [
+    "唯一开关是 config.skills['daily-fortune'].enabled，默认开（enabledByDefault:true）。",
+    "关掉后模型既看不到 daily-fortune__today 工具，也看不到那段提示词。"
+  ],
+  "capabilities": [],
+  "requires": [],
+  "_note_deps": [
+    "不依赖任何能力。配图走 pixiv-search 技能（另一个独立技能，它自己的工具会把图发出去），",
+    "没装 / 没开 pixiv-search 时本技能照样能用，只是没有图。"
+  ],
+  "settings": {
+    "enabled": true,
+    "mentionOnly": true,
+    "imageEnabled": true,
+    "showLucky": true
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用每日运势",
+      "description": "总开关。关掉后模型连工具都看不到。"
+    },
+    "mentionOnly": {
+      "type": "boolean",
+      "label": "群里只在被点名时给",
+      "description": "默认开。开着时群里必须 @ 机器人（或拍一拍它）才会给运势，普通聊天不会自己冒出来；私聊不受影响。关掉则任何触发档位都能给（机器人随机接话时也可能突然给人抽签）。"
+    },
+    "imageEnabled": {
+      "type": "boolean",
+      "label": "配一张 P 站图",
+      "description": "默认开。开着时运势里会附带一个合气氛的配图关键词，模型接着调 pixiv-search 技能把图发出来。关掉则只发文字（也不要求另一个技能在场）。"
+    },
+    "showLucky": {
+      "type": "boolean",
+      "label": "显示幸运色 / 数字 / 方位",
+      "description": "默认开。关掉后只留等级、宜、忌和一句话，回复更短。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "daily-fortune-usage",
+        "title": "每日运势",
+        "priority": 40,
+        "content": "有人想抽今天的运势、问「今天适合干什么」、要个签或者黄历式宜忌时，就用这套工具。\n\n【两步走，顺序不能反】\n① `daily-fortune__today` 抽签 —— 它**只给数据，不发消息**。\n② 你把结果用自己的口吻改写成**一条**消息，再调 `daily-fortune__send`（text=你写的文案，query=结果里的 imageQuery）把它连同配图**合并成同一条**发出去。\n\n【为什么必须用 send 发】发消息的工具默认建议「拆成多条更像真人」，但运势要的是**一整条**：等级、宜忌、幸运项、配图应该在同一个气泡里。所以这条**不要**用 send_message 发 —— 用了就会变成好几条，图还会另起一条。\n\n【什么时候用】只在这两种情况：① 私聊里对方问起；② 群里**有人 @ 你或拍了拍你**、并且是在问运势。群里别人只是聊天、没点你，就别用——工具本身也会拒绝，别去撞。\n\n【先确认工具在不在】如果 daily-fortune__today **不在你这次的可用工具列表里**（多半是设置里按分类关掉了这类工具），就当这条提示不存在：不要调它、也不要提运势这回事，正常聊别的即可 —— 硬调只会得到「未知工具」。\n\n【参数】who：给谁抽，填对方的昵称（群里问就填问的人，别填你自己）；不填就是给你自己抽。day：'today'（默认）或 'tomorrow'，只有对方明说要看明天才填 tomorrow。\n\n【文案怎么写】别把工具的原始表格照抄过去。用你自己的语气把它说成**一段话**：先点出等级和一句点评，再报宜和忌，幸运色/数字/方位顺口带一句，最后留个吉利话。两三句就够，一条消息装得下。\n\n【表情要保留】结果每一行前面都带了 emoji（🔮 🎉/🌟/✨/🍀/🌱/🌙/🌧️ ✅ 🚫 🍀 🔢 🧭 💫）。改写时**把这些表情带过去** —— 这条签本来就是图个乐，太素了不好看。但别自己再添更多，一行一个就够，不要刷一屏表情。\n\n【配图】把结果里的 imageQuery 原样填进 send 的 query —— 它是**单个日文标签**，不要自己拼两个词（这个图库只认单个标签，带空格必定搜不到）、也不要翻译成中文。send 会自己搜图并下载；**搜不到时它会自动用最宽的兜底标签重试一次**，再不行就只发文字（仍然是一条）。你不需要也不应该自己去调 pixiv-search 来配这张图。\n\n【纪律】\n· 运势是娱乐，别说得像预言，也别拿它吓人（抽到小凶就往「今天低调点反而顺」这种方向说）。\n· 同一个人同一天问几次，结果都是一样的——这不是出错，别重新抽、别改口。对方问「怎么和刚才不一样」就说明这是每日固定的签。\n· 对方没问就别主动提运势，更不要主动给人抽签。\n· 工具返回「没被点名」时，当作没这回事，别在群里解释，正常聊别的。\n· send 返回「已发送」后**立刻结束**，不要再补一条消息、不要复述运势内容。"
+      }
+    ]
+  },
+  "triggers": {
+    "when": "私聊里问到，或群里被 @ / 拍了拍之后问起今天的运势、宜忌、今天适合做什么",
+    "examples": [
+      "帮我看看今天的运势",
+      "今天适合干什么",
+      "抽个签",
+      "@机器人 我明天运势怎么样",
+      "今天有什么忌讳吗"
+    ]
+  },
+  "_note_tools_is_metadata": "上游把 tools[] 当说明性元数据读，不会自动注册；真正的注册在 index.js 的 api.registerTool。id 写 'today'，上游自动加 'daily-fortune__' 前缀 ⇒ 模型看到的是 daily-fortune__today。",
+  "tools": [
+    {
+      "id": "today",
+      "name": "抽今日运势",
+      "description": "给指定的人抽今天（或明天）的运势：等级、综合分、宜、忌、幸运色/数字/方位、一句话，并附一个合气氛的配图标签。只给数据，不发消息",
+      "category": "fun",
+      "icon": "🔮",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "who": {
+            "type": "string",
+            "description": "给谁抽，填对方昵称。不填则给自己抽。同一天同名结果固定。"
+          },
+          "day": {
+            "type": "string",
+            "enum": [
+              "today",
+              "tomorrow"
+            ],
+            "description": "抽哪一天，默认 today。只有对方明说要看明天才填 tomorrow。"
+          }
+        }
+      }
+    },
+    {
+      "id": "send",
+      "name": "发送运势（文字配图合并成一条）",
+      "description": "把模型写好的运势文案与一张配图合并成同一条消息发到当前会话；配图失败时只发文字，仍是一条",
+      "category": "fun",
+      "icon": "📮",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "要发出去的完整文案（已经改写成机器人自己的口吻，是最终稿）"
+          },
+          "query": {
+            "type": "string",
+            "description": "配图标签，填 daily-fortune__today 给的 imageQuery（单个日文标签）。留空则只发文字。"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    }
+  ]
+}

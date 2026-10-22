@@ -1,0 +1,67 @@
+{
+  "id": "balance-query",
+  "name": "余额 / 用量查询",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "查 OpenCode Go、DeepSeek、智谱 GLM、小米 MiMo 四个 AI 渠道的账户余额与滚动用量。密钥只存在本技能的设置里（界面显示为 ******），不会进提示词、不会回给模型。群友说「余额查询」「用量查询」时由模型调用。",
+  "author": "本机",
+  "enabledByDefault": true,
+  "permissions": ["web_fetch"],
+  "settings": {
+    "opencodeGoKey": "",
+    "deepseekKey": "",
+    "glmKey": "",
+    "glmRegion": "cn",
+    "mimoCookie": "",
+    "timeoutMs": 25000
+  },
+  "configSchema": {
+    "opencodeGoKey": {
+      "type": "string",
+      "secret": true,
+      "label": "OpenCode Go 密钥",
+      "description": "在 opencode.ai 控制台复制的订阅 Key。留空 = 不查这个渠道。"
+    },
+    "deepseekKey": {
+      "type": "string",
+      "secret": true,
+      "label": "DeepSeek 密钥",
+      "description": "DeepSeek 开放平台创建的 API Key（sk- 开头）。留空 = 不查这个渠道。"
+    },
+    "glmKey": {
+      "type": "string",
+      "secret": true,
+      "label": "智谱 GLM 密钥",
+      "description": "智谱开放平台的 API Key（形如 1234abcd.abcdefgh）。留空 = 不查这个渠道。"
+    },
+    "glmRegion": {
+      "type": "enum",
+      "values": ["cn", "global"],
+      "label": "智谱区域",
+      "description": "国内 open.bigmodel.cn 选 cn，海外 z.ai 选 global。选错会查不到，但不会报密钥错误之外的怪问题。"
+    },
+    "mimoCookie": {
+      "type": "string",
+      "secret": true,
+      "multiline": true,
+      "label": "小米 MiMo Cookie",
+      "description": "登录 platform.xiaomimimo.com 后，从浏览器开发者工具的 Network 里复制余额请求的整条 Cookie（必须含 api-platform_serviceToken 和 userId）。注意它是 Cookie，不是 API Key。留空 = 不查这个渠道。"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "单渠道超时（毫秒）",
+      "description": "每个渠道最多等多久，默认 25000。若本机代理是「连不上才走代理」，别低于 15000，否则海外接口还没切到代理就被判超时。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "balance-query-note",
+        "title": "余额 / 用量查询",
+        "priority": 35,
+        "content": "群友说「余额查询」「用量查询」「查余额」「还剩多少钱 / 多少额度」，或问某个 AI 服务（OpenCode Go、DeepSeek、智谱 GLM、小米 MiMo）的余额与用量时，必须调用 query_balance 拿接口真实数据再回答，不要凭记忆编数字。只问某一个渠道就把 channel 传成它；没指明就传 all。金额、百分比、重置时间要如实转述；某条查询失败时直说失败原因（该填哪个密钥），不要假装查到了。任何时候都不要猜测或复述 API Key / Cookie。"
+      }
+    ]
+  }
+}

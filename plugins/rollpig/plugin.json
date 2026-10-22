@@ -1,0 +1,56 @@
+{
+  "id": "rollpig",
+  "name": "今日小猪（RollPig）",
+  "version": "0.14.4-qqa.1",
+  "apiVersion": 1,
+  "category": "message",
+  "entry": "index.js",
+  "description": "把 NoneBot 版 RollPig 的「今日小猪 / 昨日小猪 / 随机小猪 / 找猪 / 我的猪圈 / 小猪图鉴 / 本周小猪 / 今日烤猪 / 烤群友 / 烤箱续火 / 猪圈日报」等完整玩法接到 QQ Agent 上。\n\n【怎么用】在群里直接发指令即可，例如「今日小猪」「随机小猪 3」「找猪 可爱」「我的猪圈」「小猪图鉴」「今日烤猪」「烤群友 @某人」「烤箱续火」「小猪日报 状态」。\n\n【为什么不会触发 AI】指令在消息进入活跃度判定之前就被旁路截住，不进入模型会话，所以不会被活跃度/档位/其他回复管理插件过滤，也不会再让模型用自然语言回一句。\n\n【依赖】本插件只是薄壳；真正的抽猪、烤猪、Pillow 卡片渲染跑在同机的 Python 侧车（默认 127.0.0.1:18765）。必须先按 README 安装侧车；只把本插件放进 plugins/ 而侧车未启动时，指令会退回普通聊天流程。",
+  "author": "QQ Agent RollPig contributors",
+  "enabledByDefault": true,
+  "capabilities": [
+    "rollpig.status"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "sidecarUrl": "http://127.0.0.1:18765",
+    "superusers": "",
+    "helpImage": "/media/rollpig/help/rollpig-help.png",
+    "pollIntervalMs": 2000,
+    "requestTimeoutMs": 120000
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用 RollPig",
+      "description": "关掉后摘掉 onIncoming 旁路，所有消息恢复 QQ Agent 原流程。"
+    },
+    "sidecarUrl": {
+      "type": "string",
+      "label": "侧车地址",
+      "description": "Python 无头 NoneBot 侧车的 HTTP 地址，默认 http://127.0.0.1:18765。"
+    },
+    "superusers": {
+      "type": "string",
+      "label": "超级用户 QQ",
+      "description": "可选，逗号分隔。用于「同步小猪资源」等上游 SUPERUSER 指令；留空表示不设超级用户。"
+    },
+    "helpImage": {
+      "type": "string",
+      "label": "小猪帮助图路径",
+      "description": "Docker 安装保持默认 /media/rollpig/help/rollpig-help.png；原生/Windows 填 QQA 能读到的绝对路径，例如 C:/qq-agent/media/rollpig/help/rollpig-help.png。找不到时会回退插件内置图。"
+    },
+    "pollIntervalMs": {
+      "type": "number",
+      "label": "outbox 轮询间隔（毫秒）",
+      "description": "主动推送（猪圈日报、预约通知）靠轮询 outbox 发出，默认 2000 毫秒。"
+    },
+    "requestTimeoutMs": {
+      "type": "number",
+      "label": "指令处理超时（毫秒）",
+      "description": "单条指令交给侧车处理的最长等待时间；Pillow 首次渲染图鉴可能较慢，默认 120000。"
+    }
+  },
+  "prompt": null
+}

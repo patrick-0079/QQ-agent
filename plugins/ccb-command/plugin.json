@@ -1,0 +1,62 @@
+{
+  "id": "ccb-command",
+  "name": "CCB 指令",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "message",
+  "entry": "index.js",
+  "description": "群里有人发「/ccb @某人」时，机器人固定回一条「你和'某人'ccb了'随机数'分钟，注入了'随机数'的今夜！可喜可贺」。\n\n【怎么用】\n· 在群里发：/ccb @某人 （@ 谁就写谁的名字，不 @ 任何人不触发）。\n· 两个随机数都带两位小数，每次都不一样，四档概率：80% 落在 1.00~100.00、15% 落在 100.01~1000.00、4% 落在 1000.01~10000.00、1% 落在 10000.01~100000000.00。\n· 另有彩蛋：20% 概率多回一句「恭喜怀上！」，5% 概率多回一句「非常抱歉！你的急急炸掉了！杂口杂口！」。\n· 纯本地判定，不调用模型、不花 token；要不要让模型也接一句可以在下面用「拦下指令让模型闭嘴」控制。\n· 指令词、冷却时间、彩蛋概率都在下面调；不想用就把开关关掉。",
+  "author": "DSH",
+  "enabledByDefault": true,
+  "capabilities": [
+    "ccb-command.status"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "command": "/ccb",
+    "cooldownSec": 3,
+    "consumeCommand": true,
+    "pregnantChance": 20,
+    "explodeChance": 5
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用 CCB 指令",
+      "description": "关掉后一条都不回（判定直接跳过，不会有任何消息发出）。"
+    },
+    "command": {
+      "type": "string",
+      "label": "指令词",
+      "description": "默认 /ccb。改了就按新指令触发，例如填 /cb。不区分大小写。"
+    },
+    "cooldownSec": {
+      "type": "number",
+      "label": "同群冷却（秒）",
+      "description": "同一个群两次回应之间的最小间隔，默认 3 秒（防有人连点刷屏）。填 0 = 不限制。",
+      "min": 0,
+      "max": 600
+    },
+    "consumeCommand": {
+      "type": "boolean",
+      "label": "拦下指令让模型闭嘴",
+      "description": "开着（默认）：命中指令就由本插件独占回应，同时把这条消息标为已读，模型不会再跟着回一句。关掉：模型可能再补一句。"
+    },
+    "pregnantChance": {
+      "type": "number",
+      "label": "彩蛋「恭喜怀上！」概率（%）",
+      "description": "默认 20：百分之二十的机会在正文后面多回一句「恭喜怀上！」。",
+      "min": 0,
+      "max": 100
+    },
+    "explodeChance": {
+      "type": "number",
+      "label": "彩蛋「急急炸掉了」概率（%）",
+      "description": "默认 5：百分之五的机会在正文后面多回一句「非常抱歉！你的急急炸掉了！杂口杂口！」。",
+      "min": 0,
+      "max": 100
+    }
+  },
+  "prompt": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "bili-card",
+  "name": "B站视频卡片",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "把 QQ 手机分享的哔哩哔哩卡片从「[卡片消息]」还原成标题 + 链接，让模型知道分享的是什么视频；需要细节时可查 UP 主、时长、播放量与简介。",
+  "enabledByDefault": true,
+  "permissions": ["web_fetch"],
+  "settings": {
+    "enabled": true,
+    "keepGeneric": true
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用卡片还原",
+      "description": "关掉后卡片恢复成 [卡片消息] 占位，行为与没装本技能时一致。"
+    },
+    "keepGeneric": {
+      "type": "boolean",
+      "label": "非 B 站卡片也还原",
+      "description": "开启时，网易云/知乎等其它分享卡片同样还原成「标题 + 链接」；关闭则只处理 b23.tv / bilibili.com。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "bili-card-note",
+        "title": "B站卡片",
+        "priority": 34,
+        "content": "群里出现 `[卡片]` 且带 b23.tv / bilibili.com 链接时，那是群友分享的 B 站视频。你需要知道视频讲什么时，调用 `bili-card__bili_video`（参数填卡片里那个链接）查标题、UP 主、时长、播放量和简介，再自然地接一句。不要凭标题猜内容，也不要把链接原样念一遍。"
+      }
+    ]
+  }
+}

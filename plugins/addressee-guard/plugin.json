@@ -1,0 +1,89 @@
+{
+  "id": "addressee-guard",
+  "name": "点名判定（别抢不属于自己的话）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "entry": "index.js",
+  "description": "群友明明在叫别人，机器人却当成在叫自己 —— 抢话、答非所问、用「我在/叫我吗」开场。这个插件每轮把「这句话在叫谁」算清楚，再把结论告诉模型。\n\n【判定依据（都是确定性的，不猜）】\n· @ 了谁：框架入库时就按 @ 段的 QQ 号算好了，@ 别人 ≠ @ 你\n· 喊了谁的名字：对照本群成员昵称 / 备注 / 外号表，认出「有人喊的是张三」\n· 引用了谁：`[引用 张三：…]` 里的「你/他」指的是被引用的人\n· 名字像但不是你：有人喊「小亮」而你的名字是「小鲸鱼」→ 明确告诉你那不是你\n· 泛称与代词：「AI / 机器人 / 助手」是泛称，「你 / 他 / 她」指第三方 —— 都不算点名\n\n【你看到的效果】没被点名时它照样围观、照样能有感而发地接话，只是不会再摆出「我被叫了」的姿势；被 @、被喊名字、被回复时才正常接话。\n\n【不花冤枉钱】判定全程本地计算：不联网、不调模型、不读大文件（钩子有 5 秒硬上限，这里用不到 1 毫秒）。结论只追加在请求末尾，不动系统提示词前缀，缓存不失效。\n\n【用法】装上并开启即可，无需配置。若你平时被叫的昵称和人设里的名字不一样，去下面「别名」里补上，判定会更准。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "capabilities": [
+    "addressee.locate"
+  ],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "announceCalled": true,
+    "similarNameCheck": true,
+    "pronounCheck": true,
+    "botAliases": "",
+    "genericTerms": "AI、人工智能、机器人、机宝、助手、小助手、bot",
+    "maxMessages": 8,
+    "memberScan": 40,
+    "strictTone": true,
+    "debugLog": false
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用点名判定",
+      "description": "关掉后不再往提示词里加判定结论，聊天照常，只是模型又可能自作多情。"
+    },
+    "announceCalled": {
+      "type": "boolean",
+      "label": "被点名时也告诉它",
+      "description": "打开后，真的被 @/被喊名字时会明说「这条是叫你的」，避免它因为太谨慎而漏接。"
+    },
+    "similarNameCheck": {
+      "type": "boolean",
+      "label": "识别「名字跟你像的人」",
+      "description": "有人喊「小亮」而你的名字是「小鲸鱼」时，明确告诉它那不是你。"
+    },
+    "pronounCheck": {
+      "type": "boolean",
+      "label": "分析「你/他」这类代词指向",
+      "description": "结合引用和上一句是谁说的，判断「你」指的是谁；「他/她」一般指第三方。"
+    },
+    "botAliases": {
+      "type": "string",
+      "label": "你的别名（被别人怎么叫）",
+      "description": "除人设里的名字外，群友还这么叫你 —— 逗号分隔。例：鲸鱼, 小鲸, 鲸宝。留空则只用「人设名 + 群昵称」。"
+    },
+    "genericTerms": {
+      "type": "string",
+      "label": "泛称词表",
+      "description": "这些词不算点名。顿号/逗号分隔。默认：AI、人工智能、机器人、机宝、助手、小助手、bot"
+    },
+    "maxMessages": {
+      "type": "number",
+      "label": "每轮最多分析几条",
+      "description": "消息很多时只分析最近的几条，防止提示词被撑长。默认 8"
+    },
+    "memberScan": {
+      "type": "number",
+      "label": "群成员名字取样上限",
+      "description": "从最近发言里取多少个名字来对照「喊的是谁」。默认 40"
+    },
+    "strictTone": {
+      "type": "boolean",
+      "label": "用更硬的措辞",
+      "description": "打开时会把「别用被点名的口吻」写成明确要求。"
+    },
+    "debugLog": {
+      "type": "boolean",
+      "label": "输出调试日志",
+      "description": "打开后每轮在控制台打印判定结果，排查问题时用。"
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "addressee-guard-rule",
+        "title": "谁在叫谁",
+        "priority": 55,
+        "content": "【谁在叫谁】消息下方若出现「点名判定」，那是系统给你的确定性结论，比你的猜测可靠，优先采信：\n- 有人 @ 了别人、喊了别人的名字、用「他/她」说第三方、或只说了「AI/机器人」这类泛称 —— 都不是在叫你。\n- 只有 @ 你、喊你的名字、或明确在回复你，才算点名你。\n- 没被点名时你可以正常围观、也可以有感而发地接话，但不要用「我在 / 叫我吗 / 怎么了 / 有什么事」这种被点到的口吻，也不要去回答明显在问别人的问题。"
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "skills": {
+    "agent-task": {
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "nodePath": "",
+        "workDir": "<你的工作目录>",
+        "armed": true,
+        "armedAt": 0,
+        "armedRuns": 14,
+        "backends": "wb=<可执行文件路径> {task};dsh=<可执行文件路径> {task}",
+        "defaultBackend": "wb",
+        "ownerIds": "",
+        "extraChatIds": "123456789",
+        "maxPerHour": 10,
+        "timeoutSec": 600,
+        "lockMode": "off",
+        "armedTTL": 300,
+        "maxRuns": 0,
+        "maxReplyChars": 1500,
+        "maxReplyParts": 6,
+        "announceOnStart": true,
+        "progress": true,
+        "plainMath": true,
+        "progressGapSec": 60
+      }
+    }
+  }
+}

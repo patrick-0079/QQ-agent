@@ -1,0 +1,75 @@
+{
+  "id": "bot-offline-notice",
+  "name": "一键下线通知",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "快捷上下线。主人私聊（或群里 @机器人）说一句「下线」，机器人给指定的群/私聊发一条下线通知，然后不再回应任何消息（不建会话、不调模型，直到说「上线」）；说一句「上线」恢复并再通知一次。规则触发，不经过模型判断，数字和文案全由代码生成。",
+  "author": "QQ Agent",
+  "entry": "index.js",
+  "permissions": [],
+  "enabledByDefault": false,
+  "capabilities": ["chat.skip-run"],
+  "settings": {
+    "ownerIds": "",
+    "offlineWords": "下线,关机,休息了,下班,晚安下线",
+    "onlineWords": "上线,回来,恢复,上工",
+    "statusWords": "下线状态,离线状态",
+    "notifyGroups": "",
+    "notifyPrivate": "",
+    "offlineTpl": "【{name}】下线通知：机器人要休息啦，接下来一段时间不会主动回应。\n时间：{time}\n原因：{reason}",
+    "onlineTpl": "【{name}】上线通知：机器人回来啦，可以正常聊天了。\n时间：{time}",
+    "ownerTpl": "【{name}】已下线。\n时间：{time}\n本次共通知 {chatCount} 个会话（群 {groupCount} 个，私聊 {privateCount} 个）。\n今日消耗 token：{tokens}\n缓存命中率：{hitRate}\n使用金额：{cost}\n调用次数：{runs} 次"
+  },
+  "configSchema": {
+    "ownerIds": {
+      "type": "string",
+      "label": "允许下线的 QQ 号",
+      "description": "用逗号分隔，只有这里的人说「下线」才会生效。留空则自动使用「主人识别」技能里配置的主人 QQ 号。"
+    },
+    "offlineWords": {
+      "type": "string",
+      "label": "下线触发词",
+      "description": "用逗号分隔，命中任意一个即触发。私聊里直接说，群里需要 @机器人 同一条消息里说。"
+    },
+    "onlineWords": {
+      "type": "string",
+      "label": "上线触发词",
+      "description": "用逗号分隔。主人说其中任意一个，机器人恢复回应并再通知一次。"
+    },
+    "statusWords": {
+      "type": "string",
+      "label": "状态查询触发词",
+      "description": "用逗号分隔。主人说其中任意一个，只回复当前是否处于下线状态，不发广播。"
+    },
+    "notifyGroups": {
+      "type": "string",
+      "label": "要通知的群号",
+      "description": "用逗号分隔。**留空 = 一个群都不通知**（不会再去猜你有哪些群）。"
+    },
+    "notifyPrivate": {
+      "type": "string",
+      "label": "要通知的 QQ（私聊）",
+      "description": "用逗号分隔，这些私聊会收到带今日用量统计的通知。留空则只发给主人自己。"
+    },
+    "offlineTpl": {
+      "type": "string",
+      "multiline": true,
+      "label": "群聊下线通知文案",
+      "description": "可用占位符：{name} 机器人名字、{time} 时间、{reason} 原因。"
+    },
+    "onlineTpl": {
+      "type": "string",
+      "multiline": true,
+      "label": "上线通知文案",
+      "description": "可用占位符：{name} 机器人名字、{time} 时间。"
+    },
+    "ownerTpl": {
+      "type": "string",
+      "multiline": true,
+      "label": "主人的用量通知文案",
+      "description": "只发给主人的私聊。可用占位符：{name}、{time}、{reason}、{chatCount}、{groupCount}、{privateCount}、{tokens}、{hitRate}、{cost}、{runs}。"
+    }
+  },
+  "prompt": null
+}

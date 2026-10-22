@@ -1,0 +1,23 @@
+{
+  "id": "reply-safety",
+  "name": "回复安全网（正文抢救 + 外发独白闸）",
+  "version": "2.0.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "拦住「模型的思考被当成消息发进群」，并抢救写在正文里的成品。两条路径一网打尽：① 模型没调工具、话写在正文里 → 抢救链把成品捞出来发掉，同时剔掉混在里面的独白；② 模型调了 send_message 但参数混着独白 → 响应变换逐条剔除、保留成品，整批都是独白就取消发送。按「只搬原句、拿不准一律沉默」的保守策略兜底。2026-10-05 起并入原「外发独白闸」插件（该插件已停用），判据统一由本插件持有。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "capabilities": [
+    "reply.is-planning-text",
+    "reply.is-outbound-monologue",
+    "reply.is-text-toolcall",
+    "reply.inline-calls",
+    "reply.loose-send",
+    "reply.salvage-lines",
+    "reply.grounded-select",
+    "llm.response"
+  ],
+  "requires": [],
+  "settings": {},
+  "configSchema": {}
+}

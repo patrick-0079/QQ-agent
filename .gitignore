@@ -21,6 +21,8 @@ node_modules/
 .trash/
 *.tmp
 *.bak
+*.bak-*
+.wtest.txt
 
 # 便携 QQ 运行时（setup 脚本下载/安装，不入库）
 runtime/
@@ -50,6 +52,8 @@ community.key
 
 .goal-baseline/
 
-# 三方技能和插件
-skills/
-plugins/
+# 三方技能和插件：内容入库，仅忽略各自嵌套的仓库元数据
+# （嵌套 .git 若留在原地，Git 会把这两个目录当成子仓库、只记一个空引用，
+#   所以它们的历史快照已移到 backup/ext-nested-git/，需要时可原样移回。）
+skills/.git
+plugins/.git

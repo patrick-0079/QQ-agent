@@ -1,0 +1,38 @@
+{
+  "id": "speech-to-text-qq",
+  "name": "语音转文字（QQ 原生）",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "media",
+  "enabledByDefault": false,
+  "description": "把群友发的语音转成文字，让模型能读懂语音内容。\n\n用协议端（SnowLuma / NapCat）自带的 fetch_ptt_text 接口 —— 也就是 QQ 客户端的转写能力，所以**不用装 whisper、不用下模型、不占显存**，中文识别质量就是 QQ 自己的水平。\n\n【怎么用】\n· 装上并开启即可，无需额外配置（自动读 snowluma.httpUrl 与令牌）\n· 只转「机器人需要回应」的语音；没触发回复的语音不会去转，不浪费\n· 转写结果写回聊天记录：`[语音]` → `[语音转文字] 内容`，之后翻旧账也查得到\n\n【要求】协议端支持 fetch_ptt_text（SnowLuma 与 NapCat 均可）。",
+  "author": "本地改造",
+  "permissions": [
+    "web_fetch"
+  ],
+  "configSchema": {
+    "budgetMs": {
+      "type": "number",
+      "label": "本轮最多等多久（毫秒）",
+      "description": "等到了就直接给本轮用；等不到就转后台完成，下一轮生效。不要超过 4500（框架对钩子有 5 秒硬上限）。默认 4000"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "单条语音的转写超时（毫秒）",
+      "description": "QQ 转写是异步的，太短会拿不到结果。默认 20000"
+    },
+    "debugLog": {
+      "type": "boolean",
+      "label": "输出调试日志",
+      "description": "打开后每次转写都会在控制台打印结果，排查问题时用"
+    }
+  },
+  "settings": {
+    "budgetMs": 4000,
+    "timeoutMs": 20000,
+    "debugLog": false
+  },
+  "capabilities": [
+    "speech-to-text.status"
+  ]
+}

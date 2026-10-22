@@ -1,0 +1,81 @@
+{
+  "id": "safety-guard",
+  "name": "保护词守护",
+  "version": "1.0.4",
+  "apiVersion": 1,
+  "category": "message",
+  "description": "对话涉及自杀自残、精神疾病、侵害他人等敏感话题时，给出关怀引导式的回应准则。保护词可自行增删。",
+  "enabledByDefault": true,
+  "capabilities": [
+    "safety.guard-check",
+    "safety.ai-judge"
+  ],
+  "requires": [],
+  "settings": {
+    "harmOthersEnabled": true,
+    "illegalEnabled": true,
+    "aiJudgeEnabled": true,
+    "aiJudgeTimeoutMs": 6000,
+    "logOnHit": true,
+    "harmSelfWords": "自杀,自残,轻生,想死,不想活了,活不下去,结束生命,了结自己,告别世界,想消失,割腕,跳楼,跳河,吞药,安眠药,上吊,烧炭",
+    "mentalWords": "精神疾病,精神病,神经病,抑郁症,抑郁,焦虑症,焦虑,双相,躁郁,精神分裂,精分,强迫症,创伤后应激,进食障碍,人格障碍,多动症,自闭症,阿斯伯格,心理疾病",
+    "harmOthersWords": "侵害他人,伤害他人,打人,捅人,砍人,下毒,投毒,报复社会,弄死,毁容,绑架,非法拘禁,怎么杀,杀人,杀害,捅死,毒死,勒死,无差别伤人,随机伤人,纵火,爆炸",
+    "illegalWords": "违法,犯法,毒品,吸毒,贩毒,制毒,运毒,冰毒,海洛因,大麻,笑气,走私毒品,枪支,买枪,管制刀具,炸药,自制炸药,汽油弹,黑客,入侵系统,盗号,木马,勒索病毒,人肉搜索,开盒,DDoS攻击,诈骗,电信诈骗,杀猪盘,洗钱,套路贷,传销,办假证,假币,伪造证件,网络赌博,开赌场,醉驾,酒驾,肇事逃逸,高空抛物,拐卖,诱拐,器官买卖"
+  },
+  "configSchema": {
+    "harmOthersEnabled": {
+      "type": "boolean",
+      "label": "启用「侵害他人」",
+      "description": "指伤害他人人身的一类（打人、下毒、纵火、绑架…）。关掉后，提示词里不再有这一条、该组词也不再检测。适合常在群里打游戏开黑的场景 —— 那类语境里「打人」「弄死」是正常用语，开着会误触发。与「违法事项」是两个独立开关，互不影响。",
+      "group": "侵害他人"
+    },
+    "harmOthersWords": {
+      "type": "string",
+      "label": "侵害他人类保护词",
+      "description": "命中后：拒绝协助、不提供任何可操作信息，可劝止；涉及正在发生的现实伤害时给 110 / 120。逗号分隔，可自行增删。",
+      "group": "侵害他人"
+    },
+    "illegalEnabled": {
+      "type": "boolean",
+      "label": "启用「违法事项」",
+      "description": "指毒品、网络攻击、诈骗、赌博、假证、交通违法、拐卖等违法事项（多数没有「眼前的受害者」，所以和「侵害他人」分开）。关掉后这一条不进提示词、该组词也不再检测。",
+      "group": "违法事项"
+    },
+    "illegalWords": {
+      "type": "string",
+      "label": "违法事项类保护词",
+      "description": "命中后：说清这是违法的、拒绝协助（不提供方法、渠道、剂量、购买途径），可劝一句。逗号分隔，可自行增删。",
+      "group": "违法事项"
+    },
+    "aiJudgeEnabled": {
+      "type": "boolean",
+      "label": "启用 AI 语义判断",
+      "description": "词表命中的词之后，再让模型判断一次「是不是真的、哪一类、严重到什么程度」，并把结论写进本次运行的提示词 —— 比如判断出是游戏开黑语境，机器人就不会上纲上线。关掉则只用词表结果。",
+      "group": "AI 判断"
+    },
+    "aiJudgeTimeoutMs": {
+      "type": "number",
+      "label": "AI 判断超时（毫秒）",
+      "description": "判断失败或超时会自动降级为词表结果，不影响机器人正常回复。调小更省时间，调大判断更从容。",
+      "group": "AI 判断"
+    },
+    "logOnHit": {
+      "type": "boolean",
+      "label": "命中保护词时记日志",
+      "description": "群消息命中保护词时记一条日志（只记类别，不记原文），方便你留意群里出现的敏感话题。不影响机器人的回应方式。",
+      "group": "保护词"
+    },
+    "harmSelfWords": {
+      "type": "string",
+      "label": "自杀 / 自残类",
+      "description": "命中后：先接住人、不评判不说教、绝不提供任何方法或细节，并引导专业求助（如全国心理援助热线 12356）。逗号分隔，可自行增删。",
+      "group": "保护词"
+    },
+    "mentalWords": {
+      "type": "string",
+      "label": "精神疾病类",
+      "description": "命中后：不诊断、不下结论、不推荐药物、不把疾病当梗或贴标签，正常当朋友聊。逗号分隔，可自行增删。",
+      "group": "保护词"
+    }
+  }
+}
