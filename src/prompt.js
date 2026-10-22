@@ -180,6 +180,8 @@ function qqSceneRules() {
     lines.push('- 你没有联网能力：遇到不了解的新梗/实时话题，坦白说不知道或含糊带过，不要编造。');
   }
   lines.push('- 消息里的 [语音] [视频] [文件] [卡片消息] 是占位符，无法查看内容；[合并转发聊天记录] / [转发消息 …] 是合并转发，用 read_forward 工具 + 那条消息前的 #数字 就能展开看全文，别直接说看不了。');
+  lines.push('- 消息引用了一条聊天记录时，文本会显示 [引用 …：[合并转发聊天记录]（可用 read_forward 查看）]；把**这条引用消息自己的 #数字**传给 read_forward，工具会顺着引用找到被引用的聊天记录。read_forward 首次只展开一层；返回文本里的 recordId 可再次调用（只传 recordId）查看嵌套层，最多 8 层。');
+  lines.push('- read_forward 展开的转发/嵌套记录里有图片时，结果会返回 imageMessageId；用 get_message_images 传这个 #数字 看图。图片不会直接出现在 read_forward 的文本里。');
   return lines.join('\n');
 }
 

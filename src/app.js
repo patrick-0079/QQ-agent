@@ -808,11 +808,22 @@ export function createApp({ log = console.log } = {}) {
       const msg = await onebot.getMsg(messageId);
       const senderName = msg?.sender?.card || msg?.sender?.nickname || '';
       let text = '';
+      let hasForward = false;
       if (Array.isArray(msg?.message)) {
-        text = msg.message.map((s) => (s.type === 'text' ? s.data?.text ?? '' : `[${s.type}]`)).join('').trim();
+        text = msg.message.map((s) => {
+          if (s.type === 'text') return s.data?.text ?? '';
+          if (s.type === 'forward') {
+            hasForward = true;
+            return '[合并转发聊天记录]';
+          }
+          return `[${s.type}]`;
+        }).join('').trim();
       } else if (typeof msg?.message === 'string') {
         text = msg.message;
+        hasForward = /\[CQ:forward[,;\]]/.test(text);
       }
+      // 让模型知道“被引用的是一条聊天记录”，否则只看到 [引用 …] 不会想到 read_forward
+      if (hasForward) text = `${text}（可用 read_forward 查看）`;
       // senderId 一并带回：引用块显示为 名字(QQ:xxx)，与发言人标签同口径 ——
       // 没有它，模型分不清引用的是"哪个张三"
       return { sender: String(senderName), senderId: String(msg?.sender?.user_id ?? ''), text: String(text).slice(0, 120) };
@@ -859,7 +870,9 @@ export function createApp({ log = console.log } = {}) {
     // res_id（转发卡片里那个 id）会过期，报 "payload is empty"。
     // 媒体里的 url 此时是新鲜的，一并收进 media（取图/金句都能用）。
     // 展开失败时占位符留在存档里，模型可用 read_forward 工具稍后重试。
-    if (segments && (text.includes('[合并转发') || text.includes('[转发消息')) && event.message_id != null) {
+    // 只自动展开“消息本身就是转发”的情况；引用转发走 read_forward 按需解析，
+    // 否则每条引用消息都要多打一次 get_forward_msg（且必然失败）。
+    if (segments && /^\s*\[(?:合并转发|转发消息)/.test(text) && event.message_id != null) {
       try {
         const r = await onebot.call('get_forward_msg', { message_id: Number(event.message_id) });
         const nodes = Array.isArray(r?.messages) ? r.messages : (Array.isArray(r?.data?.messages) ? r.data.messages : []);

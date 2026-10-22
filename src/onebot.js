@@ -538,16 +538,28 @@ export async function expandForwardNodes(nodes, { maxNodes = 30, maxChars = 3000
     const name = nid && nid !== rawName ? `${rawName}(QQ:${nid})` : rawName;
     const nm = n.message ?? n.content;
     let body = '';
+    const nestedRefs = [];
     if (typeof nm === 'string') {
       // 字符串形态一般是 CQ 码原文，剥掉 [CQ:xxx] 段保留纯文本
       body = nm.replace(/\[CQ:[^\]]*\]/g, '').trim();
     } else if (Array.isArray(nm)) {
-      // 嵌套 forward 段清空 data → segmentsToText 输出 [转发消息] 占位（深度 1 封顶）
-      const segs = nm.map((s) => (s?.type === 'forward' ? { type: 'forward', data: {} } : s));
+      // 嵌套 forward 段不再清空：留下 recordId，供 read_forward 逐层展开。
+      // 注意：这里只带 id，不递归请求，避免一次展开把整棵套娃树拉下来。
+      const segs = nm.map((s) => {
+        if (s?.type !== 'forward') return s;
+        const id = forwardIdFromData(s.data);
+        if (id) {
+          nestedRefs.push(id);
+          return { type: 'text', data: { text: `[嵌套聊天记录 recordId=${id}]` } };
+        }
+        return { type: 'text', data: { text: '[嵌套聊天记录：无 recordId]' } };
+      });
       body = await segmentsToText(segs, {});
       media.push(...extractMediaFromSegments(segs));
     }
     body = body.replace(/\s+/g, ' ').trim().slice(0, 200);
+    // 即使正文被截到 200 字，也把嵌套 recordId 补在末尾，保证下一层可展开
+    if (nestedRefs.length) body += ` [嵌套记录 ${[...new Set(nestedRefs)].join(', ')}]`;
     if (!body) continue;
     lines.push(`${name}: ${body}`);
     if (lines.join('\n').length > maxChars) { truncated = nodes.length - i - 1; break; }

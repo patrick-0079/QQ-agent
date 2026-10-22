@@ -6,6 +6,7 @@
 //
 // 重构说明：所有工具通过 registerTool() 注册到 tool-registry.js，
 // 支持在设置页按卡片勾选启用/禁用。
+import fs from 'node:fs';
 import { getConfig } from './config.js';
 import { isChatAdmitted } from './chat-profiles.js';
 import { normalizeMessageList, unquoteJsonString } from './util.js';
@@ -125,6 +126,117 @@ function imageParts(text, dataUrls) {
   const parts = [{ type: 'text', text }];
   for (const url of dataUrls) parts.push({ type: 'image_url', image_url: { url } });
   return parts;
+}
+
+// ── read_forward 的逐层展开状态 ──────────────────────────────────────────
+// 只允许展开本轮真正读到过的 recordId（防止模型拿任意 id 去读别的记录）。
+const FORWARD_STATE_TTL = 30 * 60 * 1000;
+const MAX_FORWARD_DEPTH = 8;
+const forwardReadStates = new Map();
+
+function forwardState(ctx) {
+  const key = String(ctx?.sessionId ?? ctx?.session?.id ?? ctx?.chatKey ?? '');
+  if (!key) return null;
+  let state = forwardReadStates.get(key);
+  if (state && (state.chatKey !== ctx?.chatKey || Date.now() - state.at > FORWARD_STATE_TTL)) state = null;
+  if (!state) {
+    state = { chatKey: ctx?.chatKey, refs: new Map(), expanded: new Set(), at: Date.now() };
+    forwardReadStates.set(key, state);
+  }
+  state.at = Date.now();
+  for (const [k, v] of forwardReadStates) {
+    if (Date.now() - v.at > FORWARD_STATE_TTL) forwardReadStates.delete(k);
+  }
+  return state;
+}
+
+/** 从展开文本里提取 recordId=...（兼容历史存档/首次展开文本）。 */
+function refsFromForwardText(text) {
+  const out = [];
+  const add = (id) => {
+    const clean = String(id || '').replace(/[.。]+$/, '').trim();
+    if (clean && !out.includes(clean)) out.push(clean);
+  };
+  // 只认 expandForwardNodes 生成的两类标记，避免把群友正文里的 recordId= 当参数
+  for (const match of String(text || '').matchAll(/\[嵌套聊天记录 recordId=([^\]\s]+)\]/g)) add(match[1]);
+  for (const match of String(text || '').matchAll(/\[嵌套记录 ([^\]]+)\]/g)) {
+    for (const id of match[1].split(/[,，]\s*/)) add(id);
+  }
+  return out;
+}
+
+function rememberForwardRefs(state, refs, depth) {
+  if (!state || depth > MAX_FORWARD_DEPTH) return;
+  for (const id of refs || []) {
+    const prev = state.refs.get(id);
+    if (!prev || prev.depth > depth) state.refs.set(id, { depth });
+  }
+}
+
+function nestedForwardList(state) {
+  if (!state) return [];
+  return [...state.refs.entries()]
+    .filter(([id]) => !state.expanded.has(id))
+    .map(([recordId, meta]) => ({ recordId, depth: meta.depth }));
+}
+
+/**
+ * 转发里的图片不能只靠 tool 返回的 count —— 模型看不到图。
+ * 统一把图片挂到“根消息”的 media 上，并告诉模型用 get_message_images(根消息 #)
+ * 查看；引用转发/嵌套层都适用，且不会覆盖消息正文。
+ */
+function attachForwardImages(ctx, state, media) {
+  const images = Array.isArray(media)
+    ? media.filter((m) => m?.kind === 'image' && (m.url || m.file))
+    : [];
+  if (!images.length || state?.rootMessageId == null) return 0;
+  ctx.store.updateByMid(ctx.chatKey, state.rootMessageId, { appendMedia: images });
+  return images.length;
+}
+
+function forwardImageHint(state, count) {
+  if (!count || state?.rootMessageId == null) return '';
+  return `；${count} 张图片已附到消息 #${state.rootMessageId}，用 get_message_images 传这个 #数字查看`;
+}
+
+/** 取一条消息的转发节点；兼容“引用转发”只有 reply.id 的协议端。 */
+async function fetchForwardNodes(ctx, entry) {
+  const mid = Number(entry.mid);
+  try {
+    const r = await ctx.onebot.call('get_forward_msg', { message_id: mid }, 8000);
+    const nodes = Array.isArray(r?.messages) ? r.messages
+      : Array.isArray(r?.data?.messages) ? r.data.messages : [];
+    if (nodes.length) return nodes;
+    throw new Error('记录为空');
+  } catch (firstError) {
+    const msg = await ctx.onebot.call('get_msg', { message_id: mid }, 8000);
+    const segmentsOf = (m) => (Array.isArray(m?.message) ? m.message : []);
+    let ref = segmentsOf(msg).find((s) => s?.type === 'forward');
+    if (!ref) {
+      // 引用转发：当前消息只有 reply 段，转发本体在被引用的那条消息里。
+      const reply = segmentsOf(msg).find((s) => s?.type === 'reply');
+      const quotedId = reply?.data?.id;
+      if (quotedId != null) {
+        // 被引用的消息本身可能就是一条转发：优先用它的 message_id 直接取，
+        // 比 forward 段里的 res_id 更不容易过期。
+        try {
+          const direct = await ctx.onebot.call('get_forward_msg', { message_id: Number(quotedId) }, 8000);
+          const directNodes = Array.isArray(direct?.messages) ? direct.messages
+            : Array.isArray(direct?.data?.messages) ? direct.data.messages : [];
+          if (directNodes.length) return directNodes;
+        } catch { /* 继续走 res_id 回退 */ }
+        const quoted = await ctx.onebot.call('get_msg', { message_id: Number(quotedId) }, 8000);
+        ref = segmentsOf(quoted).find((s) => s?.type === 'forward') || ref;
+      }
+    }
+    const resId = ref ? String(ref.data?.id ?? ref.data?.res_id ?? ref.data?.forward_id ?? '') : '';
+    if (!resId) throw firstError;
+    const r2 = await ctx.onebot.call('get_forward_msg', { id: resId }, 8000);
+    const nodes = Array.isArray(r2?.messages) ? r2.messages
+      : Array.isArray(r2?.data?.messages) ? r2.data.messages : [];
+    if (!nodes.length) throw new Error('记录为空');
+    return nodes;
+  }
 }
 
 /**
@@ -465,7 +577,7 @@ function registerAllTools() {
   registerTool({
     id: 'get_recent_messages',
     name: '查看历史消息',
-    description: '往前翻当前会话的更多历史消息（提示词里只带了最近一段；需要更早的上下文时用）。返回带 messageId（就是聊天记录里的 #数字），可用于引用或看图。消息文本出现 [合并转发聊天记录] 时，用 read_forward 展开看内容。',
+    description: '往前翻当前会话的更多历史消息（提示词里只带了最近一段；需要更早的上下文时用）。返回带 messageId（就是聊天记录里的 #数字），可用于引用或看图。消息文本出现 [合并转发聊天记录] / [转发消息 …] 时，用 read_forward 展开；引用了聊天记录的消息也可以把它的 #数字传给 read_forward。',
     category: 'query',
     icon: '📜',
     parameters: {
@@ -496,49 +608,101 @@ function registerAllTools() {
   registerTool({
     id: 'read_forward',
     name: '展开转发消息',
-    description: '展开查看合并转发的聊天记录。消息文本出现 [合并转发聊天记录] 或 [转发消息 …] 占位符时用。参数填那条转发消息前的 #数字（千万别用方括号里那串长 id，会过期报错）。展开结果会写回存档，以后再看就是展开的文本，不用重复调。',
+    description: '展开合并转发的聊天记录，一次只返回一层。首次传 messageId（消息前的 #数字）；如果这条消息是“引用了聊天记录”，也传它自己的 #数字，工具会顺着引用找到被引用的记录。返回文本里的 recordId 可再次调用（只传 recordId）查看嵌套层，最多 8 层。转发里的图片会返回 imageMessageId，用 get_message_images 传这个 #数字 查看。直接转发会把展开结果写回存档。',
     category: 'query',
     icon: '📨',
     parameters: {
       type: 'object',
       properties: {
-        messageId: { type: ['integer', 'string'], description: '转发消息自己的 QQ 消息 id（聊天记录里的 #数字，可能为负数）' }
-      },
-      required: ['messageId']
+        messageId: { type: ['integer', 'string'], description: '要展开的消息自己的 QQ 消息 id（聊天记录里的 #数字，可能为负数）。传了 recordId 时可省略。' },
+        recordId: { type: 'string', description: '嵌套聊天记录 id（从上次返回文本的 recordId=... 获取）；只展开这一层。' },
+        refresh: { type: 'boolean', description: '仅直接转发：存档已展开但没有嵌套 recordId 时，传 true 重新从 QQ 拉取一层，检查嵌套。' }
+      }
     },
     async execute(ctx, args) {
       try {
+        const state = forwardState(ctx);
+        const recordId = String(args?.recordId ?? '').trim();
+
+        // ── 嵌套层：只允许本轮真正发现过的 recordId ──
+        if (recordId) {
+          const meta = state?.refs.get(recordId);
+          if (!meta) {
+            return err(`recordId=${recordId} 不在本轮已展开的转发里，不能读取。先传 messageId 展开原消息，再用返回文本里的 recordId 继续。`);
+          }
+          if (state.expanded.has(recordId)) {
+            return err(`嵌套记录 ${recordId} 已经展开过，避免循环不再重复读取。`);
+          }
+          if (meta.depth > MAX_FORWARD_DEPTH) {
+            return err(`已达到最大嵌套层数（${MAX_FORWARD_DEPTH}），不能再展开 ${recordId}。`);
+          }
+          const r = await ctx.onebot.call('get_forward_msg', { id: recordId }, 8000);
+          const nodes = Array.isArray(r?.messages) ? r.messages
+            : Array.isArray(r?.data?.messages) ? r.data.messages : [];
+          if (!nodes.length) return err('嵌套记录为空或已被 QQ 服务端丢弃（发送时间太久）');
+          const ex = await expandForwardNodes(nodes, { maxNodes: 60, maxChars: 6000 });
+          if (!ex?.text) return err('嵌套记录内容为空');
+          state.expanded.add(recordId);
+          const refs = refsFromForwardText(ex.text);
+          rememberForwardRefs(state, refs, meta.depth + 1);
+          const attached = attachForwardImages(ctx, state, ex.media);
+          return ok({
+            recordId,
+            depth: meta.depth,
+            text: ex.text,
+            images: (ex.media || []).length,
+            imageMessageId: attached ? state.rootMessageId : undefined,
+            nested: nestedForwardList(state),
+            note: attached ? forwardImageHint(state, attached).replace(/^；/, '') : undefined
+          });
+        }
+
+        if (args?.messageId === undefined || args?.messageId === null || String(args.messageId).trim() === '') {
+          return err('请传 messageId（消息前的 #数字）或 recordId（嵌套记录 id）。');
+        }
         const entry = ctx.store.findByMid(ctx.chatKey, args.messageId);
         if (!entry) return err(`当前会话找不到消息 ${args.messageId}。${midHint(ctx)}`);
-        // 存档里已是展开文本（收消息时已展开/之前展开过）→ 直接给，不再请求 QQ
-        if (String(entry.text || '').startsWith('[合并转发 共')) {
-          return ok({ messageId: entry.mid, text: entry.text, note: '该转发已展开（读的是存档）' });
+
+        // 存档里已是展开文本（收消息时已展开/之前展开过）→ 直接给，顺带登记嵌套 id。
+        // refresh=true 可强制重拉：兼容本功能上线前展开、没有嵌套标记的老存档。
+        if (!args?.refresh && String(entry.text || '').startsWith('[合并转发 共')) {
+          const refs = refsFromForwardText(entry.text);
+          rememberForwardRefs(state, refs, 1);
+          state.rootMessageId = entry.mid;
+          const imageCount = (entry.media || []).filter((m) => m?.kind === 'image' && (m.url || m.file)).length;
+          return ok({
+            messageId: entry.mid,
+            text: entry.text,
+            images: imageCount,
+            imageMessageId: imageCount ? entry.mid : undefined,
+            nested: nestedForwardList(state),
+            note: `该转发已展开（读的是存档）；嵌套记录可传 recordId 继续查看${forwardImageHint(state, imageCount)}`
+          });
         }
-        const r = await ctx.onebot.call('get_forward_msg', { message_id: Number(entry.mid) }).catch(async (error) => {
-          // 2026-10-22：部分协议端对“引用转发/部分转发”用 message_id 取不到，
-          // 但 get_msg 里能看到 forward 的 res_id，用 {id: res_id} 能取到。
-          const msg = await ctx.onebot.call('get_msg', { message_id: Number(entry.mid) });
-          const segmentsOf = (m) => (Array.isArray(m?.message) ? m.message : []);
-          let ref = segmentsOf(msg).find((s) => s?.type === 'forward');
-          if (!ref) {
-            // 引用转发：msg 是“引用了一条转发”的消息，转发本体在 reply.id 里。
-            const reply = segmentsOf(msg).find((s) => s?.type === 'reply');
-            const quotedId = reply?.data?.id;
-            if (quotedId != null) {
-              const quoted = await ctx.onebot.call('get_msg', { message_id: Number(quotedId) });
-              ref = segmentsOf(quoted).find((s) => s?.type === 'forward') || ref;
-            }
-          }
-          const resId = ref ? String(ref.data?.id ?? ref.data?.res_id ?? '') : '';
-          if (!resId) throw error;
-          return ctx.onebot.call('get_forward_msg', { id: resId });
-        });
-        const nodes = Array.isArray(r?.messages) ? r.messages : [];
-        const ex = await expandForwardNodes(nodes);
+
+        const nodes = await fetchForwardNodes(ctx, entry);
+        const ex = await expandForwardNodes(nodes, { maxNodes: 60, maxChars: 6000 });
         if (!ex || !ex.text) return err('转发内容为空或已被 QQ 服务端丢弃（发送时间太久）');
-        // 写回存档：一次展开，永久升级这条记录（模型/存档页/金句墙都受益）
-        ctx.store.updateByMid(ctx.chatKey, entry.mid, { text: ex.text, appendMedia: ex.media || [] });
-        return ok({ messageId: entry.mid, text: ex.text, images: (ex.media || []).length });
+
+        const refs = refsFromForwardText(ex.text);
+        rememberForwardRefs(state, refs, 1);
+        state.rootMessageId = entry.mid;
+        // 直接转发写回正文；引用转发只追加图片，保留原消息里的引用/评论文字
+        const direct = /^\[(?:合并转发|转发消息)/.test(String(entry.text || ''));
+        const images = (ex.media || []).filter((m) => m?.kind === 'image' && (m.url || m.file));
+        ctx.store.updateByMid(ctx.chatKey, entry.mid, direct
+          ? { text: ex.text, appendMedia: images }
+          : { appendMedia: images });
+        return ok({
+          messageId: entry.mid,
+          text: ex.text,
+          images: images.length,
+          imageMessageId: images.length ? entry.mid : undefined,
+          nested: nestedForwardList(state),
+          note: direct
+            ? `已写回存档；嵌套记录可传 recordId 继续查看${forwardImageHint(state, images.length)}`
+            : `引用转发不覆盖原消息（保留引用文本）；嵌套记录可传 recordId 继续查看${forwardImageHint(state, images.length)}`
+        });
       } catch (error) {
         return err(`展开失败：${error?.message ?? error}`);
       }
@@ -636,9 +800,37 @@ function registerAllTools() {
       try {
         const entry = ctx.store.findByMid(ctx.chatKey, args.messageId);
         if (!entry) return err(`当前会话找不到消息 ${args.messageId}。${midHint(ctx)}`);
-        const urls = (entry.media || []).filter((m) => m.kind === 'image' && m.url).map((m) => m.url);
-        if (!urls.length) return ok(`消息 ${args.messageId} 没有可查看的图片`);
-        const results = [];
+        const candidates = (entry.media || []).filter((m) => m?.kind === 'image' && (m.url || m.file));
+        if (!candidates.length) return ok(`消息 ${args.messageId} 没有可查看的图片`);
+        const urls = [];
+        const preloaded = [];
+        for (const m of candidates) {
+          let url = String(m.url || '').trim();
+          if (!url && m.file) {
+            // 转发节点里常只有协议端 file 缓存号，没有直链；向协议端换一次地址/files路径
+            try {
+              const ret = await ctx.onebot.call('get_image', { file: String(m.file) }, 8000);
+              url = String(ret?.url || ret?.data?.url || '').trim();
+              const local = String(ret?.file || '').trim();
+              if (!url && local && fs.existsSync(local)) {
+                const buf = fs.readFileSync(local);
+                if (buf.length) {
+                  const compressed = await compressImage(buf);
+                  const mime = compressed.compressed ? compressed.mime : (detectMime(buf) || 'image/jpeg');
+                  preloaded.push({
+                    dataUrl: `data:${mime};base64,${compressed.buffer.toString('base64')}`,
+                    isGif: mime === 'image/gif',
+                    gifBuffer: null
+                  });
+                  continue;
+                }
+              }
+            } catch { /* 下面按失败统计 */ }
+          }
+          if (url) urls.push(url);
+        }
+        if (!urls.length && !preloaded.length) return err(`消息 ${args.messageId} 有 ${candidates.length} 张图片，但协议端没有返回可下载地址`);
+        const results = [...preloaded];
         const failed = [];
         for (const url of urls) {
           try { results.push(await downloadImageAsDataUrl(url)); } catch (e) { failed.push(String(e?.message ?? e)); }
