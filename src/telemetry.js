@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR, ROOT } from './config.js';
+import { listLegacyFiles, readIndexEntries } from './storage/session-files.js';
 
 const REPORT_URL = 'https://kondius.cn/qq-agent/api/telemetry';
 const INTERVAL_MS = 6 * 3600 * 1000;   // 之后每 6 小时一次
@@ -34,8 +35,23 @@ function countLlmCalls(s) {
 function loadTotals() {
   try { return JSON.parse(fs.readFileSync(TOTALS_FILE, 'utf8')); } catch { /* 需要重建 */ }
   const t = { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, toolCounts: {} };
+  const seen = new Set();
   try {
-    for (const f of fs.readdirSync(SESSIONS_DIR).filter((x) => x.endsWith('.json'))) {
+    // 新格式：索引摘要已含真实记账与工具计数
+    for (const e of readIndexEntries()) {
+      const u = e.usage || {};
+      t.calls += Math.max(0, Number(u.calls) || (Array.isArray(e.usageRows) ? e.usageRows.length : 0));
+      t.promptTokens += Number(u.promptTokens) || 0;
+      t.completionTokens += Number(u.completionTokens) || 0;
+      t.totalTokens += Number(u.totalTokens) || 0;
+      for (const [name, n] of Object.entries(e.toolCounts || {})) {
+        t.toolCounts[String(name)] = (t.toolCounts[String(name)] || 0) + (Number(n) || 0);
+      }
+      seen.add(String(e.id));
+    }
+    // 旧格式：未迁移的完整档案
+    for (const f of listLegacyFiles()) {
+      if (seen.has(f.replace(/\.json$/, ''))) continue;
       let s;
       try { s = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8')); } catch { continue; }
       const u = s.usage || {};

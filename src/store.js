@@ -1,5 +1,10 @@
-// 每个会话（group:xxx / private:xxx）一个不断增长的 JSON 消息存储。
+// 每个会话（group:xxx / private:xxx）一个不断增长的存档。
 // 这是新架构的核心数据结构：模型不携带对话历史，每次运行都从这里拼接"已读信息"。
+//
+// 物理格式（2026-10 起）：快照 JSON + 追加式 JSONL，见 storage/chatlog.js。
+//   messages/<chat>.json    快照（旧版本文件可直接当快照读）
+//   messages/<chat>.jsonl   快照之后的增量事件，只追加
+// 日常收消息只写一行 delta；delta 超阈值时才折叠成快照，避免"一条消息重写整个文件"。
 //
 // 条目格式：
 // {
@@ -15,38 +20,16 @@
 //   media:     可选 [{ kind, url, file, faceId, summary }] 原始媒体定位信息
 // }
 import fs from 'node:fs';
-import path from 'node:path';
-import { DATA_DIR } from './config.js';
-
-const MESSAGES_DIR = path.join(DATA_DIR, 'messages');
-
-function chatFile(chatKey) {
-  // chatKey 形如 group:123 / private:456
-  const safe = String(chatKey).replace(/[^a-z0-9_]/gi, '_');
-  return path.join(MESSAGES_DIR, `${safe}.json`);
-}
-
-function loadChat(chatKey) {
-  try {
-    let text = fs.readFileSync(chatFile(chatKey), 'utf8');
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    const parsed = JSON.parse(text);
-    if (parsed && Array.isArray(parsed.messages)) return parsed;
-  } catch { /* 新会话 */ }
-  return { chatKey, nextLocalId: 1, messages: [] };
-}
-
-function saveChat(state) {
-  fs.mkdirSync(MESSAGES_DIR, { recursive: true });
-  const tmp = `${chatFile(state.chatKey)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 1), 'utf8');
-  fs.renameSync(tmp, chatFile(state.chatKey));
-}
+import {
+  appendChatEvent, compactChat, loadChatState, messagesDir
+} from './storage/chatlog.js';
 
 export class ChatStore {
   constructor(maxPerChat = 0) {
     this.maxPerChat = Math.max(0, Number(maxPerChat) || 0);
-    this.chats = new Map(); // chatKey -> state
+    this.chats = new Map();        // chatKey -> state
+    this.delta = new Map();        // chatKey -> { count, bytes }（本进程追加量）
+    this.compacting = new Set();   // 正在异步压缩的 chatKey
   }
 
   setMaxPerChat(cap) {
@@ -54,20 +37,62 @@ export class ChatStore {
   }
 
   #state(chatKey) {
-    if (!this.chats.has(chatKey)) this.chats.set(chatKey, loadChat(chatKey));
+    if (!this.chats.has(chatKey)) {
+      const loaded = loadChatState(chatKey);
+      this.chats.set(chatKey, loaded.state);
+      this.delta.set(chatKey, { count: loaded.deltaCount, bytes: loaded.deltaBytes });
+    }
     return this.chats.get(chatKey);
   }
 
-  listChats() {
-    // 从磁盘文件名还原（group_123.json -> group:123），已加载的直接带上
+  /** 追加一条事件到 JSONL，并维护压缩阈值。 */
+  #append(chatKey, event) {
+    const st = this.#state(chatKey);
+    const full = appendChatEvent(chatKey, st, event);
+    const stats = this.delta.get(chatKey) || { count: 0, bytes: 0 };
+    stats.count += 1;
+    stats.bytes += JSON.stringify(full).length + 1;
+    this.delta.set(chatKey, stats);
+    if (stats.count >= 2000 || stats.bytes >= 2 * 1024 * 1024) this.#scheduleCompact(chatKey);
+    return full;
+  }
+
+  #scheduleCompact(chatKey) {
+    if (this.compacting.has(chatKey)) return;
+    this.compacting.add(chatKey);
+    setImmediate(() => {
+      try {
+        const st = this.chats.get(chatKey);
+        if (st) {
+          compactChat(chatKey, st);
+          this.delta.set(chatKey, { count: 0, bytes: 0 });
+        }
+      } catch { /* 压缩失败保留 delta，下次再试 */ } finally {
+        this.compacting.delete(chatKey);
+      }
+    });
+  }
+
+  #compactNow(chatKey) {
     try {
-      const files = fs.readdirSync(MESSAGES_DIR).filter((f) => /^(group|private)_\d+\.json$/.test(f));
-      for (const f of files) {
-        const m = /^(group|private)_(\d+)\.json$/.exec(f);
-        if (m) this.#state(`${m[1]}:${m[2]}`);
+      const st = this.chats.get(chatKey);
+      if (!st) return;
+      compactChat(chatKey, st);
+      this.delta.set(chatKey, { count: 0, bytes: 0 });
+    } catch { /* ignore */ }
+  }
+
+  listChats() {
+    // 从磁盘文件名还原（group_123.json / group_123.jsonl -> group:123）。
+    // 与旧实现不同：这里不再把所有会话都读进内存，只列 key，元信息按需加载。
+    const out = new Set();
+    try {
+      for (const f of fs.readdirSync(messagesDir())) {
+        const m = /^(group|private)_(\d+)\.(json|jsonl)$/.exec(f);
+        if (m) out.add(`${m[1]}:${m[2]}`);
       }
     } catch { /* 目录不存在 */ }
-    return [...this.chats.keys()];
+    return [...out];
   }
 
   getChatMeta(chatKey) {
@@ -82,8 +107,9 @@ export class ChatStore {
   /** 追加一条收到的消息（未读）。返回写入的条目。 */
   appendIncoming(chatKey, { mid, ts, senderId, senderName, text, reply = null, media = [], isPoke = false, atMe = null, atNames = [] }) {
     const st = this.#state(chatKey);
+    const id = st.nextLocalId;
     const entry = {
-      id: st.nextLocalId++,
+      id,
       mid: mid ?? null,
       ts: ts || Date.now(),
       senderId: String(senderId ?? ''),
@@ -103,17 +129,17 @@ export class ChatStore {
       // 防"@ 别人的名字里带关键词"误触发。空数组 = 该消息没有 @ 段。
       atNames: (Array.isArray(atNames) ? atNames : []).map((n) => String(n ?? '')).filter(Boolean).slice(0, 20)
     };
-    st.messages.push(entry);
+    this.#append(chatKey, { t: 'm', n: id + 1, m: entry });
     this.#trim(st);
-    saveChat(st);
     return entry;
   }
 
   /** 记录机器人自己发出的消息（已读）。 */
   appendSelf(chatKey, { text, ts, mid = null }) {
     const st = this.#state(chatKey);
+    const id = st.nextLocalId;
     const entry = {
-      id: st.nextLocalId++,
+      id,
       mid: mid ?? null,
       ts: ts || Date.now(),
       senderId: 'self',
@@ -124,9 +150,8 @@ export class ChatStore {
       reply: null,
       media: []
     };
-    st.messages.push(entry);
+    this.#append(chatKey, { t: 'm', n: id + 1, m: entry });
     this.#trim(st);
-    saveChat(st);
     return entry;
   }
 
@@ -134,8 +159,11 @@ export class ChatStore {
   drainUnread(chatKey) {
     const st = this.#state(chatKey);
     const unread = st.messages.filter((m) => !m.read && !m.self);
-    for (const m of st.messages) m.read = true;
-    saveChat(st);
+    let changed = false;
+    for (const m of st.messages) {
+      if (!m.read) { m.read = true; changed = true; }
+    }
+    if (changed) this.#append(chatKey, { t: 'read', all: true });
     return unread;
   }
 
@@ -163,7 +191,7 @@ export class ChatStore {
       else { m.read = true; archived++; }   // 触发点之前的旧积压：沉入历史
     }
     for (const m of st.messages) m.read = true;   // batch 里的也置已读（作为触发批取走）
-    saveChat(st);
+    if (unread.length) this.#append(chatKey, { t: 'read', all: true });
     return { batch, archived };
   }
 
@@ -183,7 +211,7 @@ export class ChatStore {
     for (const m of st.messages) {
       if (!m.read && !m.self) { m.read = true; n++; }
     }
-    if (n) saveChat(st);
+    if (n) this.#append(chatKey, { t: 'read', all: true });
     return n;
   }
 
@@ -200,10 +228,9 @@ export class ChatStore {
    */
   markEntryRead(chatKey, id) {
     const st = this.#state(chatKey);
-    const m = st.messages.find((x) => x.id === id);
+    const m = st.messages.find((x) => x.id === Number(id));
     if (!m || m.read || m.self) return false;
-    m.read = true;
-    saveChat(st);
+    this.#append(chatKey, { t: 'read', ids: [m.id] });
     return true;
   }
 
@@ -219,13 +246,13 @@ export class ChatStore {
     const st = this.#state(chatKey);
     const winStart = Number(startedAt) - 5 * 60 * 1000;
     const winEnd = Number(endedAt || startedAt) + 1000;
-    let n = 0;
+    const ids = [];
     for (const m of st.messages) {
       if (m.self) continue;
-      if (m.read && m.ts >= winStart && m.ts <= winEnd) { m.read = false; n++; }
+      if (m.read && m.ts >= winStart && m.ts <= winEnd) { m.read = false; ids.push(m.id); }
     }
-    if (n) saveChat(st);
-    return n;
+    if (ids.length) this.#append(chatKey, { t: 'unread', ids });
+    return ids.length;
   }
 
   unreadCount(chatKey) {
@@ -263,9 +290,7 @@ export class ChatStore {
     const target = String(mid);
     const m = st.messages.find((x) => String(x.mid) === target);
     if (!m) return false;
-    m.recalled = true;
-    m.read = true;   // 撤回的消息也算"已读"，不再触发回复
-    saveChat(st);
+    this.#append(chatKey, { t: 'recall', mid: m.mid });
     return true;
   }
 
@@ -279,15 +304,20 @@ export class ChatStore {
     const target = String(mid);
     const m = st.messages.find((x) => String(x.mid) === target);
     if (!m) return false;
-    if (text != null) m.text = String(text);
+    const nextText = text != null ? String(text) : m.text;
+    let nextMedia = Array.isArray(m.media) ? m.media : [];
     if (appendMedia.length) {
-      m.media = Array.isArray(m.media) ? m.media : [];
-      const seen = new Set(m.media.map((x) => x && x.url));
+      nextMedia = [...nextMedia];
+      // 转发节点里的图片经常只有协议端 file 缓存号、没有直链；不能只按 url 去重，
+      // 否则 file 型图片会被整批丢弃（表现为 read_forward 说 images=N 但看不了图）。
+      const mediaKey = (x) => String(x?.url || x?.file || '').trim();
+      const seen = new Set(nextMedia.map(mediaKey).filter(Boolean));
       for (const x of appendMedia) {
-        if (x && x.url && !seen.has(x.url)) { m.media.push(x); seen.add(x.url); }
+        const key = mediaKey(x);
+        if (key && !seen.has(key)) { nextMedia.push(x); seen.add(key); }
       }
     }
-    saveChat(st);
+    this.#append(chatKey, { t: 'edit', id: m.id, text: nextText, media: nextMedia });
     return true;
   }
 
@@ -306,10 +336,10 @@ export class ChatStore {
     const ids = new Set((Array.isArray(localIds) ? localIds : [localIds]).map(Number));
     if (!ids.size) return 0;
     const before = st.messages.length;
-    st.messages = st.messages.filter((m) => !ids.has(m.id));
-    const removed = before - st.messages.length;
-    if (removed) saveChat(st);
-    return removed;
+    const existing = st.messages.filter((m) => ids.has(m.id)).map((m) => m.id);
+    if (!existing.length) return 0;
+    this.#append(chatKey, { t: 'del', ids: existing });
+    return before - st.messages.length;
   }
 
   /**
@@ -320,8 +350,8 @@ export class ChatStore {
     const st = this.#state(chatKey);
     const removed = st.messages.length;
     if (removed) {
-      st.messages = [];
-      saveChat(st);
+      this.#append(chatKey, { t: 'clear' });
+      this.#compactNow(chatKey);
     }
     return removed;
   }
@@ -353,7 +383,8 @@ export class ChatStore {
 
   #trim(st) {
     if (this.maxPerChat > 0 && st.messages.length > this.maxPerChat) {
-      st.messages.splice(0, st.messages.length - this.maxPerChat);
+      const minId = st.messages[st.messages.length - this.maxPerChat].id;
+      this.#append(st.chatKey, { t: 'trim', minId });
     }
   }
 }

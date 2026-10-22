@@ -1,32 +1,70 @@
 // 会话（运行）记录：每次 agent 处理 = 一个会话，完整留档供 UI 查看。
-// 文件：data/sessions/<id>.json；索引在内存里维护（最近优先）。
+//
+// 物理布局（2026-10 起，P2 冷热分离）：
+//   data/sessions/index.jsonl          一行一个已结束会话的摘要（含逐次调用用量）
+//   data/sessions/archive/<id>.json.gz 完整档案（提示词/消息/发送记录），按需解压
+//   data/sessions/running/<id>.json    运行中会话的摘要（≈1KB，不含提示词）
+//   data/sessions/<id>.json            旧版完整档案，只读兼容 + 启动后台迁移
+//
+// 为什么拆：旧实现运行中每 2 秒重写整个会话（含提示词与全部消息），
+// 一个 2 分钟的运行要写几十次、几十 MB；列清单/用量又要全量扫几千个 JSON。
+// 现在热路径只写 1KB 摘要，结束写一次 gzip，列表与统计只读 index.jsonl。
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR } from './config.js';
+import {
+  appendIndexEntry, archiveDir, archiveFile, deleteSessionArtifacts, ensureSessionsDirs,
+  indexFile, legacyFile, listLegacyFiles, readArchive, readIndexEntries,
+  readRunningSummaries, readSessionFull, rewriteIndex, runningFile,
+  sessionsDir, writeArchive, writeRunningSummary
+} from './storage/session-files.js';
 
-const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
-// 索引缓存：启动加速的关键。没有它时 #loadIndex 要逐个 readFileSync+JSON.parse
-// 全部会话文件（用户实测 2277 个文件 / 178MB 要 25 秒）；有了它启动只读这一个
-// ~0.5MB 的单文件（3ms 级）。缓存与磁盘文件的增量校验在后台异步做（见
-// reconcileInBackground），所以缓存缺失/过期都只是"首次启动慢"，不会错。
-const INDEX_CACHE_FILE = path.join(DATA_DIR, 'session-index-cache.json');
-const INDEX_CACHE_VERSION = 1;
-// 僵尸回收窗口：上次进程异常退出遗留的 running/waiting 会话只会出现在
-// **最近修改**的文件里（运行中的会话每 2 秒节流落盘一次）。启动时只扫
-// 最近 ZOMBIE_SCAN_WINDOW_DAYS 天的文件就足够，老文件几乎不可能是僵尸——
-// 全量扫 2000+ 文件只为找几个僵尸太亏。
+const SESSIONS_DIR = sessionsDir();
 const ZOMBIE_SCAN_WINDOW_DAYS = 3;
-// 变更后写缓存的防抖间隔：写缓存本身也是 ~0.5MB 的同步 IO，不值得每次
-// update 都写。掉电最坏情况 = 缓存落后几秒，下次启动靠后台对账/补读修正。
-const INDEX_CACHE_WRITE_DEBOUNCE_MS = 5000;
+const INDEX_COMPACT_MIN_LINES = 10000;
+const INDEX_COMPACT_MAX_BYTES = 8 * 1024 * 1024;
 
 export function newSessionId() {
   return `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
 }
 
+/** 旧版完整档案路径（保留导出，兼容外部引用）。 */
 export function sessionFile(id) {
-  return path.join(SESSIONS_DIR, `${id}.json`);
+  return legacyFile(id);
+}
+
+/** 从会话消息序列里展开每次真实 LLM 调用（与用量页同口径）。 */
+function usageRowsOf(session) {
+  const rows = [];
+  const started = Number(session?.startedAt) || 0;
+  for (const m of (Array.isArray(session?.messages) ? session.messages : [])) {
+    const raw = m?.raw;
+    if (!raw || typeof raw !== 'object') continue;
+    const ru = raw.usage || {};
+    const promptTokens = Number(ru.prompt_tokens) || 0;
+    const completionTokens = Number(ru.completion_tokens) || 0;
+    if (!promptTokens && !completionTokens) continue;
+    const at = Number(raw.created) ? Number(raw.created) * 1000 : started;
+    rows.push({
+      at,
+      p: promptTokens,
+      c: completionTokens,
+      cached: Number(ru.prompt_tokens_details?.cached_tokens) || 0,
+      model: String(raw.model || session.model || '')
+    });
+  }
+  return rows;
+}
+
+/** 工具调用次数（token-ledger / 用量页的趣味统计口径）。 */
+function toolCountsOf(session) {
+  const out = Object.create(null);
+  for (const m of (Array.isArray(session?.messages) ? session.messages : [])) {
+    const name = m?.toolCall?.name;
+    if (name) out[String(name)] = (out[String(name)] || 0) + 1;
+  }
+  return out;
 }
 
 export class SessionRegistry {
@@ -37,10 +75,15 @@ export class SessionRegistry {
    */
   constructor(keepFiles = 0) {
     this.keepFiles = Math.max(0, Number.isFinite(Number(keepFiles)) ? Math.round(Number(keepFiles)) : 0);
-    this.index = [];   // [{ id, chatKey, startedAt, endedAt, status, outcome, usage, trigger, model, promptChars }]
-    this.current = new Map(); // id -> session object（运行中的在内存里）
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    this.index = [];                  // 内存摘要（运行中 + 已结束），最近优先
+    this.current = new Map();         // id -> session（运行中的在内存里）
+    this.indexed = new Set();         // 已写进 index.jsonl 的 id
+    this.known = new Set();           // 内存里出现过的 id（含仅 legacy 的）
+    this._lastPersistAt = new Map();
+    this.reconcileStarted = false;
+    ensureSessionsDirs();
     this.#loadIndex();
+    this.#reclaimRunningZombies();
   }
 
   /**
@@ -51,114 +94,126 @@ export class SessionRegistry {
   setKeepFiles(keepFiles) {
     const next = Math.max(0, Number.isFinite(Number(keepFiles)) ? Math.round(Number(keepFiles)) : 0);
     this.keepFiles = next;
-    if (next > 0) {
-      this.index = this.index.slice(0, next);
-      this.#pruneFiles();
-    }
-    this.#scheduleIndexCacheWrite(0);
+    if (next > 0) this.#enforceKeepFiles();
   }
 
-  /** 按 keepFiles 清理磁盘上的旧会话文件（保留最新 N 个）。 */
-  #pruneFiles() {
+  /** 按 keepFiles 清理磁盘上的旧档案（保留最新 N 个已结束会话）。 */
+  #enforceKeepFiles() {
     if (!(this.keepFiles > 0)) return;
-    try {
-      const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json')).sort().reverse();
-      // 运行中/等待中的会话文件不在删除范围：UI 还指着它，删了会出现"详情 404"
-      const activeIds = new Set(
-        [...(this.current?.values?.() ?? [])].map((s) => String(s?.id ?? '')).filter(Boolean)
-      );
-      for (const f of files.slice(this.keepFiles)) {
-        if (activeIds.has(f.replace(/\.json$/, ''))) continue;
-        try { fs.rmSync(path.join(SESSIONS_DIR, f), { force: true }); } catch { /* ignore */ }
-      }
-    } catch { /* ignore */ }
-  }
-
-  #loadIndex() {
-    // ── 快路径：读索引缓存（单文件，毫秒级）──
-    // 缓存条目 = 磁盘上全部会话的 summary；启动直接用它当 this.index，
-    // 后台再异步对账（#rebuildIndexInBackground）修正差异（外部删文件/
-    // 缓存写坏/版本变更）。任何缓存问题都会在几秒后被真值覆盖。
-    let diskFiles = null;
-    try {
-      diskFiles = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json')).sort().reverse();
-    } catch { /* 目录还没建 */ }
-    if (diskFiles) {
-      const cached = this.#readIndexCache();
-      if (cached && Array.isArray(cached.entries)) {
-        const cachedIds = new Set(cached.entries.map((e) => e?.id).filter(Boolean));
-        // 只保留磁盘上确实存在的条目（外部删了文件/清理脚本跑过）
-        this.index = cached.entries.filter((e) => diskFiles.includes(`${e.id}.json`));
-        // 磁盘上有、缓存里没有的文件（缓存之后新产生的）→ 同步补读
-        // 通常很少（上次运行结束到缓存写入之间的窗口），大量缺失走后台
-        const missing = diskFiles.filter((f) => !cachedIds.has(f.replace(/\.json$/, '')));
-        if (missing.length > 0 && missing.length <= 200) {
-          for (const f of missing) this.#loadOne(f, /* zombieScan */ false);
-          this.#sortIndex();
-        } else if (missing.length > 200) {
-          // 大量缺失（换数据目录/缓存超老）：直接走慢路径全量读
-          this.index = [];
-          this.#loadAll(diskFiles);
-        } else {
-          this.#sortIndex();
-        }
-        // 僵尸回收单独小窗口扫（见 ZOMBIE_SCAN_WINDOW_DAYS 注释）
-        this.#reclaimZombies(diskFiles);
-        this.#writeIndexCache();
-        return;
-      }
+    const runningIds = new Set(this.current.keys());
+    const completed = this.index.filter((e) => !runningIds.has(e.id));
+    const drop = completed.slice(this.keepFiles);
+    if (!drop.length) return;
+    const dropIds = new Set(drop.map((e) => e.id));
+    for (const id of dropIds) {
+      deleteSessionArtifacts(id);
+      this.known.delete(id);
+      this.indexed.delete(id);
     }
-    // ── 慢路径：无缓存（首次/缓存损坏）── 全量读 + 写缓存
-    if (diskFiles) this.#loadAll(diskFiles);
-    this.#writeIndexCache();
+    this.index = this.index.filter((e) => !dropIds.has(e.id));
+    this.#writeIndexFromMemory();
   }
 
-  /** 全量读磁盘文件建索引（慢路径，与旧版 #loadIndex 行为一致）。 */
-  #loadAll(diskFiles) {
-    for (const f of diskFiles) this.#loadOne(f, /* zombieScan */ false);
-    this.#reclaimZombies(diskFiles);
+  /** 启动：只读索引；小规模/首次升级时同步补扫旧版文件，大的走后台。 */
+  #loadIndex() {
+    const raw = readIndexEntries();
+    const kept = [];
+    let dropped = 0;
+    for (const e of raw) {
+      const id = String(e.id);
+      if (fs.existsSync(archiveFile(id)) || fs.existsSync(legacyFile(id))) kept.push(e);
+      else dropped += 1;
+    }
+    this.index = kept;
+    this.indexed = new Set(kept.map((e) => String(e.id)));
+    this.known = new Set(this.indexed);
+    if (dropped) {
+      try { rewriteIndex(kept); } catch { /* ignore */ }
+    }
+    let legacy = [];
+    try { legacy = listLegacyFiles(); } catch { /* ignore */ }
+    if (legacy.length && (this.index.length === 0 || legacy.length <= 200)) {
+      for (const f of legacy) this.#loadLegacySummary(f);
+    }
     this.#sortIndex();
   }
 
-  /** 读单个会话文件进索引。zombieScan=true 时顺带做僵尸回收写回。 */
-  #loadOne(file, zombieScan) {
+  /** 旧版完整档案 → 摘要（只读，不迁移；迁移由 reconcileInBackground 做）。 */
+  #loadLegacySummary(file) {
     try {
+      const id = file.replace(/\.json$/, '');
+      if (this.known.has(id)) return;
       const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf8'));
       if (!data?.id) return;
-      if (zombieScan && (data.status === 'running' || data.status === 'waiting')) {
-        // 僵尸会话回收：进程上次退出时正在运行/等待的会话，运行循环已不存在，
-        // 状态却停留在 running/waiting —— UI 里既不结束也无法中止（中止按钮
-        // 找不到活对象）。这里启动即改判 aborted 并写回文件，让会话页能看到
-        // 真实状态。不改内存 current（启动时它是空的，这些会话本来就不在其中）。
+      if (data.status === 'running' || data.status === 'waiting') {
         data.status = 'aborted';
         data.endedAt = data.endedAt ?? Date.now();
-        data.abortedOnBoot = true;   // 标记来源，UI/排障能分清"用户中止"和"重启遗留"
-        try { fs.writeFileSync(path.join(SESSIONS_DIR, file), JSON.stringify(data)); } catch { /* 写不回就只改内存视图 */ }
+        data.abortedOnBoot = true;
       }
-      this.index.push(this.#summary(data));
+      const summary = this.#summary(data);
+      this.index.push(summary);
+      this.known.add(String(data.id));
     } catch { /* 跳过坏文件 */ }
   }
 
-  /** 僵尸回收：只扫最近 ZOMBIE_SCAN_WINDOW_DAYS 天改过的文件。 */
-  #reclaimZombies(diskFiles) {
+  /** 启动僵尸回收：running/ 里遗留的摘要改成 aborted 并归档。 */
+  #reclaimRunningZombies() {
     const cutoff = Date.now() - ZOMBIE_SCAN_WINDOW_DAYS * 86400000;
-    for (const f of diskFiles) {
+    for (const summary of readRunningSummaries()) {
       try {
-        const st = fs.statSync(path.join(SESSIONS_DIR, f));
-        if (st.mtimeMs >= cutoff) {
-          const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8'));
-          if (data?.id && (data.status === 'running' || data.status === 'waiting')) {
-            data.status = 'aborted';
-            data.endedAt = data.endedAt ?? Date.now();
-            data.abortedOnBoot = true;
-            try { fs.writeFileSync(path.join(SESSIONS_DIR, f), JSON.stringify(data)); } catch { /* ignore */ }
-            // 索引里对应条目同步改状态（可能已因 #loadOne 进表）
-            const idx = this.index.findIndex((e) => e.id === data.id);
-            if (idx >= 0) this.index[idx] = this.#summary(data);
-            else this.index.push(this.#summary(data));
-          }
+        const id = String(summary.id);
+        if (!id) continue;
+        if (this.indexed.has(id)) { fs.rmSync(runningFile(id), { force: true }); continue; }
+        // 旧版完整档案还在：优先让后台迁移读它，不要先用摘要壳覆盖
+        if (fs.existsSync(legacyFile(id))) { fs.rmSync(runningFile(id), { force: true }); continue; }
+        // 档案已存在（finish 写完但没删 running）→ 补索引，删 running
+        const archived = readArchive(id);
+        if (archived && !archived.partial) {
+          this.#rememberSummary(this.#summary(archived));
+          this.#appendIndex(this.#summary(archived));
+          fs.rmSync(runningFile(id), { force: true });
+          continue;
         }
-      } catch { /* 跳过 */ }
+        const startedAt = Number(summary.startedAt) || 0;
+        if (startedAt && startedAt < cutoff) {
+          // 太老的运行中摘要：没有完整档案可救，直接清掉，避免占位
+          fs.rmSync(runningFile(id), { force: true });
+          continue;
+        }
+        const shell = {
+          id,
+          chatKey: summary.chatKey || '',
+          startedAt,
+          endedAt: Date.now(),
+          status: 'aborted',
+          waitUntil: null,
+          trigger: summary.trigger || '',
+          triggerSummary: summary.trigger || '',
+          triggerText: '',
+          systemPrompt: '',
+          userPrompt: '',
+          promptChars: Number(summary.promptChars) || 0,
+          model: summary.model || '',
+          rounds: Number(summary.rounds) || 0,
+          messages: [],
+          sent: [],
+          feedbacks: [],
+          finishReason: null,
+          error: '进程退出时仍在运行（启动回收）',
+          usage: summary.usage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0, calls: 0 },
+          vendor: summary.vendor || '',
+          chatName: summary.chatName || '',
+          webSearchCount: Number(summary.webSearchCount) || 0,
+          activity: '',
+          abortedOnBoot: true,
+          partial: true
+        };
+        writeArchive(shell);
+        const sm = this.#summary(shell);
+        this.#rememberSummary(sm);
+        this.#appendIndex(sm);
+        fs.rmSync(runningFile(id), { force: true });
+      } catch { /* 单个失败不影响启动 */ }
     }
   }
 
@@ -166,82 +221,18 @@ export class SessionRegistry {
     this.index.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
   }
 
-  /** 读索引缓存；版本不匹配/损坏返回 null。 */
-  #readIndexCache() {
-    try {
-      const data = JSON.parse(fs.readFileSync(INDEX_CACHE_FILE, 'utf8'));
-      if (data?.version === INDEX_CACHE_VERSION && Array.isArray(data.entries)) return data;
-    } catch { /* 无缓存/坏缓存 */ }
-    return null;
+  #rememberSummary(summary) {
+    if (!summary?.id) return;
+    const id = String(summary.id);
+    const idx = this.index.findIndex((e) => String(e.id) === id);
+    if (idx >= 0) {
+      this.index[idx] = summary;      // startedAt 不变，顺序无需重排（热路径）
+    } else {
+      this.index.push(summary);
+      this.#sortIndex();
+    }
+    this.known.add(id);
   }
-
-  /** 写索引缓存（写前剔除运行中的：它们还没落成最终态，写进去是过期视图）。 */
-  #writeIndexCache() {
-    try {
-      const currentIds = new Set(this.current.keys());
-      const entries = this.index.filter((e) => !currentIds.has(e.id));
-      const tmp = `${INDEX_CACHE_FILE}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ version: INDEX_CACHE_VERSION, savedAt: Date.now(), entries }), 'utf8');
-      fs.renameSync(tmp, INDEX_CACHE_FILE);
-    } catch { /* 写缓存失败不影响功能 */ }
-  }
-
-  /**
-   * 防抖写缓存：索引有变动时调这个，而不是直接 #writeIndexCache ——
-   * 运行中的会话每次 update 都会改索引条目，逐次写 0.5MB 同步 IO 太亏。
-   * flushIndexCache()（进程退出前）会立刻落盘。
-   */
-  #scheduleIndexCacheWrite(delay = INDEX_CACHE_WRITE_DEBOUNCE_MS) {
-    if (this.#indexCacheTimer) clearTimeout(this.#indexCacheTimer);
-    this.#indexCacheTimer = setTimeout(() => {
-      this.#indexCacheTimer = null;
-      this.#writeIndexCache();
-    }, delay);
-    this.#indexCacheTimer.unref?.();
-  }
-  #indexCacheTimer = null;
-
-  /** 立即落盘缓存（stop() 调用；清掉防抖定时器当场写）。 */
-  flushIndexCache() {
-    if (this.#indexCacheTimer) { clearTimeout(this.#indexCacheTimer); this.#indexCacheTimer = null; }
-    this.#writeIndexCache();
-  }
-
-  /**
-   * 后台对账：异步全量重扫磁盘，修正缓存路径可能漏掉的差异
-   * （运行中被外部删文件、缓存写入竞态等）。启动毫秒级返回，对账在
-   * 事件循环空闲时进行，不阻塞请求。
-   * @returns {Promise<void>} 完成时 resolve（供测试等待）
-   */
-  reconcileInBackground() {
-    if (this.#reconcileStarted) return Promise.resolve();
-    this.#reconcileStarted = true;
-    return new Promise((resolve) => {
-      setImmediate(() => {
-        try {
-          const diskFiles = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json'));
-          const known = new Set(this.index.map((e) => `${e.id}.json`));
-          let changed = false;
-          for (const f of diskFiles) {
-            if (known.has(f)) continue;
-            // 缓存里没有的新文件（上一进程运行后期产生的）
-            this.#loadOne(f, /* zombieScan */ true);
-            changed = true;
-          }
-          // 缓存里有、磁盘上没有的（外部删除）→ 摘掉
-          const diskSet = new Set(diskFiles);
-          const filtered = this.index.filter((e) => diskSet.has(`${e.id}.json`));
-          if (filtered.length !== this.index.length) { this.index = filtered; changed = true; }
-          if (changed) {
-            this.#sortIndex();
-            this.#writeIndexCache();
-          }
-        } catch { /* 对账失败保持现状 */ }
-        resolve();
-      });
-    });
-  }
-  #reconcileStarted = false;
 
   #summary(s) {
     return {
@@ -253,13 +244,47 @@ export class SessionRegistry {
       waitUntil: s.waitUntil ?? null,
       activity: s.activity ?? '',
       webSearchCount: s.webSearchCount ?? 0,
+      searchCount: s.webSearchCount ?? 0,
       outcome: s.outcome ?? null,            // { sent: n, finishReason }
       usage: s.usage ?? null,
       model: s.model ?? '',
+      vendor: s.vendor ?? '',
+      chatName: s.chatName ?? '',
       trigger: s.triggerSummary ?? '',
       promptChars: s.promptChars ?? 0,
-      rounds: s.rounds ?? 0
+      rounds: s.rounds ?? 0,
+      // 用量页需要的逐次调用明细：索引自带，避免为了统计再解压全部档案
+      usageRows: usageRowsOf(s),
+      toolCounts: toolCountsOf(s)
     };
+  }
+
+  /** 追加一行索引；如果该 id 已在索引里（重复结束），走整表重写去重。 */
+  #appendIndex(summary) {
+    if (!summary?.id) return;
+    const id = String(summary.id);
+    if (this.indexed.has(id)) {
+      this.#writeIndexFromMemory();
+      return;
+    }
+    appendIndexEntry(summary);
+    this.indexed.add(id);
+    this.known.add(id);
+  }
+
+  /** 原子重写 index.jsonl（只写已结束会话，运行中的不落索引）。 */
+  #writeIndexFromMemory() {
+    const entries = this.index.filter((e) => !this.current.has(String(e.id)));
+    rewriteIndex(entries);
+    this.indexed = new Set(entries.map((e) => String(e.id)));
+  }
+
+  /** 索引行数太多时压缩（去重 + 只保留内存里的）。 */
+  #maybeCompactIndex() {
+    let bytes = 0;
+    try { bytes = fs.statSync(indexFile()).size; } catch { /* ignore */ }
+    if (this.indexed.size < INDEX_COMPACT_MIN_LINES && bytes < INDEX_COMPACT_MAX_BYTES) return;
+    this.#writeIndexFromMemory();
   }
 
   create({ chatKey, trigger, triggerSummary, status = 'running', waitUntil = null }) {
@@ -287,9 +312,9 @@ export class SessionRegistry {
     };
     this.current.set(session.id, session);
     this.#persist(session);
-    this.index.unshift(this.#summary(session));
-    if (this.keepFiles > 0) this.index = this.index.slice(0, this.keepFiles);
-    this.#scheduleIndexCacheWrite();
+    const summary = this.#summary(session);
+    this.index.unshift(summary);
+    this.known.add(String(session.id));
     return session;
   }
 
@@ -299,8 +324,8 @@ export class SessionRegistry {
       return structuredClone(s);
     }
     try {
-      const data = JSON.parse(fs.readFileSync(sessionFile(id), 'utf8'));
-      return data;
+      const data = readSessionFull(id);
+      return data || null;
     } catch {
       return null;
     }
@@ -315,7 +340,7 @@ export class SessionRegistry {
   peek(id) {
     if (this.current.has(id)) return this.current.get(id);
     try {
-      return JSON.parse(fs.readFileSync(sessionFile(id), 'utf8'));
+      return readSessionFull(id);
     } catch {
       return null;
     }
@@ -325,8 +350,7 @@ export class SessionRegistry {
     const s = this.current.get(id);
     if (s) {
       this.#persistThrottled(s);
-      const idx = this.index.findIndex((e) => e.id === id);
-      if (idx >= 0) this.index[idx] = this.#summary(s);
+      this.#rememberSummary(this.#summary(s));
     }
     return s ?? null;
   }
@@ -347,21 +371,11 @@ export class SessionRegistry {
     s.endedAt = Date.now();
     this.current.delete(id);
     this._lastPersistAt?.delete(id);   // 节流时间戳随会话结束清理，防止 map 无限增长
+    // 先更新内存摘要，再落盘：这样重复 finish 时整表重写拿到的是新状态
+    this.#rememberSummary(this.#summary(s));
     this.#persist(s);
-    const idx = this.index.findIndex((e) => e.id === id);
-    if (idx >= 0) this.index[idx] = this.#summary(s);
-    this.#scheduleIndexCacheWrite();
-    // 清理超出保留数的旧文件
-    try {
-      if (this.keepFiles > 0) {
-        const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json')).sort();
-        if (files.length > this.keepFiles) {
-          for (const f of files.slice(0, files.length - this.keepFiles)) {
-            try { fs.unlinkSync(path.join(SESSIONS_DIR, f)); } catch { /* ignore */ }
-          }
-        }
-      }
-    } catch { /* ignore */ }
+    this.#enforceKeepFiles();
+    this.#maybeCompactIndex();
     return s;
   }
 
@@ -383,12 +397,12 @@ export class SessionRegistry {
     if (s && s.status !== 'waiting') return false;
     this.current.delete(id);
     const before = this.index.length;
-    this.index = this.index.filter((e) => e.id !== id);
-    try {
-      const f = path.join(SESSIONS_DIR, `${id}.json`);
-      if (fs.existsSync(f)) fs.unlinkSync(f);
-    } catch { /* ignore */ }
-    this.#scheduleIndexCacheWrite();
+    const wasIndexed = this.indexed.has(String(id));
+    this.index = this.index.filter((e) => String(e.id) !== String(id));
+    this.indexed.delete(String(id));
+    this.known.delete(String(id));
+    deleteSessionArtifacts(id);
+    if (wasIndexed) this.#writeIndexFromMemory();
     return this.index.length < before;
   }
 
@@ -405,12 +419,11 @@ export class SessionRegistry {
     if (s && s.status === 'running') return false;
     this.current.delete(id);
     const before = this.index.length;
-    this.index = this.index.filter((e) => e.id !== id);
-    try {
-      const f = path.join(SESSIONS_DIR, `${id}.json`);
-      if (fs.existsSync(f)) fs.unlinkSync(f);
-    } catch { /* ignore */ }
-    this.#scheduleIndexCacheWrite();
+    this.index = this.index.filter((e) => String(e.id) !== String(id));
+    this.indexed.delete(String(id));
+    this.known.delete(String(id));
+    deleteSessionArtifacts(id);
+    this.#writeIndexFromMemory();
     return this.index.length < before;
   }
 
@@ -426,20 +439,21 @@ export class SessionRegistry {
     let removed = 0;
     const remaining = [];
     for (const e of this.index) {
-      if (keepIds.has(e.id)) { remaining.push(e); continue; }
-      removed++;
-      try {
-        const f = path.join(SESSIONS_DIR, `${e.id}.json`);
-        if (fs.existsSync(f)) fs.unlinkSync(f);
-      } catch { /* ignore */ }
+      if (keepIds.has(String(e.id))) { remaining.push(e); continue; }
+      removed += 1;
+      deleteSessionArtifacts(e.id);
+      this.indexed.delete(String(e.id));
+      this.known.delete(String(e.id));
     }
     this.index = remaining;
-    this.#scheduleIndexCacheWrite();
+    this.#writeIndexFromMemory();
     return removed;
   }
 
   listSummaries(limit = 100) {
-    return this.index.slice(0, limit);
+    // 索引里为用量页保存了 usageRows/toolCounts（每会话可能几十行）；
+    // HTTP /api/sessions 只需要摘要，剥掉这两个内部字段避免响应体膨胀。
+    return this.index.slice(0, limit).map(({ usageRows, toolCounts, ...rest }) => rest);
   }
 
   /** 今日 token 统计（含运行中的）。 */
@@ -525,14 +539,11 @@ export class SessionRegistry {
    *
    * 曾经 update() 每次都 #persist —— activity 翻转（每轮 2 次）、每个工具调用
    * 都会同步 writeFileSync 整个会话 JSON（含提示词与所有消息，越跑越大）。
-   * 同步写盘阻塞 event loop，排在后面的 SSE 广播/HTTP 响应全被拖慢。
-   *
-   * 可靠性：finish() 仍走 #persist 直接落最终态，所以留档完整性不变；
-   * 代价是进程崩溃时最多丢 2 秒的运行中进度（索引摘要不受影响，在内存里）。
+   * 现在只写 running/<id>.json 的摘要（≈1KB），完整档案在 finish 时写一次。
+   * 可靠性：崩溃最多丢 2 秒的运行中进度；完整档案本来就要等结束才写。
    */
   #persistThrottled(s) {
     const now = Date.now();
-    this._lastPersistAt ||= new Map();
     const last = this._lastPersistAt.get(s.id) || 0;
     if (now - last < 2000) return;
     this._lastPersistAt.set(s.id, now);
@@ -541,14 +552,116 @@ export class SessionRegistry {
 
   #persist(s) {
     try {
-      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-      const tmp = `${sessionFile(s.id)}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(s, null, 1), 'utf8');
-      fs.renameSync(tmp, sessionFile(s.id));
-      if (s.status !== 'running' && s.status !== 'waiting') this.#bumpTodayUsage(s);
+      if (s.status === 'running' || s.status === 'waiting') {
+        writeRunningSummary(this.#summary(s));
+        return;
+      }
+      writeArchive(s);
+      this.#appendIndex(this.#summary(s));
+      try { fs.rmSync(runningFile(s.id), { force: true }); } catch { /* ignore */ }
+      this.#bumpTodayUsage(s);
     } catch (error) {
       console.error('[sessions] 持久化失败:', error?.message ?? error);
     }
+  }
+
+  /**
+   * 后台对账 + 旧版迁移：把 sessions/<id>.json 压缩成 archive/<id>.json.gz，
+   * 补索引后删除旧文件（校验失败则保留）。启动毫秒级返回，迁移在后台分片做。
+   * @returns {Promise<void>} 完成时 resolve（供测试等待）
+   */
+  reconcileInBackground() {
+    if (this.reconcileStarted) return Promise.resolve();
+    this.reconcileStarted = true;
+    return new Promise((resolve) => {
+      setImmediate(async () => {
+        try {
+          const legacy = listLegacyFiles();
+          for (let i = 0; i < legacy.length; i += 1) {
+            this.#migrateLegacyFile(legacy[i]);
+            if ((i + 1) % 20 === 0) await new Promise((r) => setImmediate(r));
+          }
+          this.#reconcileOrphanArchives();
+          this.#reclaimRunningZombies();
+          this.#maybeCompactIndex();
+        } catch { /* 迁移失败保持现状，下次启动再试 */ }
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * 补索引：archive/ 里存在、但 index.jsonl 里没有的档案。
+   * 典型来源：写完 gzip 后进程退出、或索引行写失败。档案是真相，索引可重建。
+   */
+  #reconcileOrphanArchives() {
+    let files = [];
+    try { files = fs.readdirSync(archiveDir()).filter((f) => f.endsWith('.json.gz')); } catch { return; }
+    for (const f of files) {
+      const id = f.replace(/\.json\.gz$/, '');
+      if (!id || this.indexed.has(id)) continue;
+      const data = readArchive(id);
+      if (!data?.id) continue;
+      const summary = this.#summary(data);
+      this.#rememberSummary(summary);
+      this.#appendIndex(summary);
+    }
+  }
+
+  /** 迁移单个旧版档案；成功且校验通过后才删除原文件。 */
+  #migrateLegacyFile(file) {
+    const id = file.replace(/\.json$/, '');
+    if (!id || this.current.has(id)) return;
+    try {
+      if (this.indexed.has(id) && fs.existsSync(archiveFile(id))) {
+        const existing = readArchive(id);
+        if (existing && !existing.partial) {
+          fs.rmSync(path.join(SESSIONS_DIR, file), { force: true });
+          return;
+        }
+        // partial 壳：继续用旧文件重建完整档案
+      }
+      if (fs.existsSync(archiveFile(id))) {
+        const archived = readArchive(id);
+        // 启动回收写出的摘要壳（partial）不能当作完整档案：继续读旧文件覆盖它
+        if (archived?.id && !archived.partial) {
+          const summary = this.#summary(archived);
+          this.#rememberSummary(summary);
+          this.#appendIndex(summary);
+          fs.rmSync(path.join(SESSIONS_DIR, file), { force: true });
+          return;
+        }
+        if (archived?.partial) {
+          // 落下去读旧文件，走下面的完整迁移
+        } else {
+          return;
+        }
+      }
+      const raw = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf8');
+      const data = JSON.parse(raw);
+      if (!data?.id) return;
+      if (data.status === 'running' || data.status === 'waiting') {
+        data.status = 'aborted';
+        data.endedAt = data.endedAt ?? Date.now();
+        data.abortedOnBoot = true;
+      }
+      writeArchive(data);
+      // 校验：能解压且 id 对得上，才删旧文件
+      const verify = readArchive(data.id);
+      if (!verify || String(verify.id) !== String(data.id)) return;
+      const summary = this.#summary(verify);
+      this.#rememberSummary(summary);
+      this.#appendIndex(summary);
+      // 默认删旧文件省磁盘；QQ_AGENT_KEEP_LEGACY_SESSIONS=1 时保留，便于回滚/核对
+      if (String(process.env.QQ_AGENT_KEEP_LEGACY_SESSIONS || '') !== '1') {
+        fs.rmSync(path.join(SESSIONS_DIR, file), { force: true });
+      }
+    } catch { /* 保留旧文件，下次再试 */ }
+  }
+
+  /** 立即落盘索引（stop() 调用；也用于去重/压缩）。 */
+  flushIndexCache() {
+    this.#writeIndexFromMemory();
   }
 }
 

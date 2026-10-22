@@ -30,6 +30,9 @@ import { logger } from './logger.js';
 import { markSkillDefaultOff } from './skills/config.js';
 import { isChatAdmitted, isChatAdmittedById, isSkillWantedAnywhere, purgeSkillFromProfiles } from './chat-profiles.js';
 import { startCommunitySync, isGloballyBlocked, FIXED_PRICE_FEED_URL } from './community.js';
+import {
+  indexFile, listLegacyFiles, readIndexEntries, readRunningSummaries, runningDir, sessionsDir
+} from './storage/session-files.js';
 
 // 全局 fetch（undici）默认连接建立超时只有 10 秒，openrouter.ai 这类海外端点
 // 握手慢时会直接报 "Connect Timeout Error ... timeout: 10000ms"（注意这不是
@@ -1502,13 +1505,13 @@ export function createApp({ log = console.log } = {}) {
     // 匿名用量遥测：启动 90 秒后发第一次，之后每 6 小时一次；失败静默不影响使用
     startTelemetryLoop(log);
 
-    // 会话索引后台对账：启动读的是毫秒级缓存，这里异步补扫磁盘修正差异
-    // （缓存缺失的新文件/外部删除的文件）。不 await —— 不挡任何启动步骤。
+    // 会话索引后台对账 + 旧版档案迁移：启动只读 index.jsonl，这里异步把
+    // 尚未迁移的 sessions/<id>.json 压缩归档并补索引。不 await —— 不挡启动。
     sessions.reconcileInBackground();
 
-    // 用量档案预热：首次打开用量页的卡顿来自"冷 parse 全部会话文件"
-    //（2290 个 / 178MB 实测 1.3~1.9 秒）。启动后台先预热一次（collectUsageRows
-    // 内部分片让步，不阻塞事件循环），用户点开用量页时档案已就绪，
+    // 用量档案预热：新格式直接读 index.jsonl（毫秒级），旧文件才需要 parse。
+    // 启动后台先预热一次（collectUsageRows 内部分片让步，不阻塞事件循环），
+    // 用户点开用量页时档案已就绪，
     // 只剩窗口过滤（毫秒级）。不 await；失败静默（用量页会自己再算）。
     collectUsageRows({ range: '7' }).catch(() => {});
 
@@ -1807,20 +1810,37 @@ const USAGE_CACHE_TTL_MS = 20000;
 // 已解析会话的档案（增量解析的持久层）：sig（目录快照）→ 每会话的展开行/计数。
 // 与 usageRowsCache 的区别：后者是"某个时间窗的最终 rows"，前者是
 // "全部会话的原始素材" —— 换 range 时不必重新读盘。
-const usageArchive = { sig: '', at: 0, sessions: null };   // sessions: Map(file -> {rows[], searchCount, toolCounts})
+const usageArchive = { sig: '', at: 0, sessions: null };   // sessions: Map(sessionId -> {rows[], searchCount, toolCounts})
 // 让步前最多同步解析的文件数（B 方案的切片粒度）
 const USAGE_PARSE_CHUNK = 50;
 
-/** 目录快照：文件数 + 目录 mtime。成本低（一次 stat），足以捕捉增删。 */
-function sessionsDirSignature() {
-  const dir = path.join(DATA_DIR, 'sessions');
+function fileSig(file) {
   try {
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
-    const st = fs.statSync(dir);
-    return files.length + ':' + st.mtimeMs + ':' + files.reduce((a, f) => a + f.length, 0);
+    const st = fs.statSync(file);
+    return `${st.size}:${st.mtimeMs}`;
   } catch {
-    return '';
+    return '0:0';
   }
+}
+
+/**
+ * 目录快照：索引文件 + 运行中摘要 + 旧版文件计数。
+ * 新格式下索引是唯一权威，必须把它的 size/mtime 纳入签名；
+ * running/*.json 每 2 秒改写一次，也要让用量页看到运行中的增量。
+ */
+function sessionsDirSignature() {
+  let dirMtime = 0;
+  try { dirMtime = fs.statSync(sessionsDir()).mtimeMs; } catch { return ''; }
+  let legacyCount = 0;
+  let legacyNames = 0;
+  for (const f of listLegacyFiles()) { legacyCount += 1; legacyNames += f.length; }
+  let running = '';
+  try {
+    for (const f of fs.readdirSync(runningDir()).filter((x) => x.endsWith('.json')).sort()) {
+      running += `${f}@${fileSig(path.join(runningDir(), f))};`;
+    }
+  } catch { /* 没有运行中的 */ }
+  return `${fileSig(indexFile())}|${legacyCount}:${legacyNames}|${running}|${dirMtime}`;
 }
 
 /**
@@ -1885,40 +1905,88 @@ function parseUsageSessionFile(dir, f) {
   return out;
 }
 
-/**
- * （异步）刷新"已解析档案"到当前目录快照。
- * 只重读**变化过的文件**（新文件 + mtime 变了的文件），其余复用 ——
- * 2144 个文件只有几个新增时，重读量从 172MB 降到几 MB。
- * 解析按 USAGE_PARSE_CHUNK 分片、片间 setImmediate 让步，不长阻塞事件循环。
- */
-async function refreshUsageArchive(dir, files, sig) {
-  if (usageArchive.sessions && usageArchive.sig === sig) return usageArchive.sessions;
-  const prev = (usageArchive.sessions && usageArchive.sig.split(':').slice(0, 2).join(':') === sig.split(':').slice(0, 2).join(':'))
-    ? usageArchive.sessions : new Map();
-  const next = new Map();
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    const old = prev.get(f);
-    let st;
-    try { st = fs.statSync(path.join(dir, f)); } catch { continue; }
-    if (old && old.mtime === st.mtimeMs) {
-      next.set(f, old);   // 文件没变：复用上次的解析结果（零读盘）
-      continue;
+/** 索引摘要 → 用量解析结果（与 parseUsageSessionFile 同构）。 */
+function indexEntryToParsed(e) {
+  const started = Number(e.startedAt) || 0;
+  const exactRows = Array.isArray(e.usageRows) ? e.usageRows : [];
+  const rows = [];
+  for (const r of exactRows) {
+    const p = Number(r?.p) || 0;
+    const c = Number(r?.c) || 0;
+    if (!p && !c) continue;
+    rows.push({
+      promptTokens: p,
+      completionTokens: c,
+      cachedTokens: Number(r?.cached) || 0,
+      at: Number(r?.at) || started,
+      model: String(r?.model || e.model || '') || '(未知)'
+    });
+  }
+  if (!rows.length) {
+    const u = e.usage || {};
+    const p = Number(u.promptTokens) || 0;
+    const c = Number(u.completionTokens) || 0;
+    if (p || c) {
+      rows.push({
+        promptTokens: p,
+        completionTokens: c,
+        cachedTokens: Number(u.cachedTokens) || 0,
+        at: started,
+        model: String(e.model || '') || '(未知)'
+      });
     }
-    next.set(f, parseUsageSessionFile(dir, f));
-    // 分片让步：单文件最大 ~1MB，50 个一批的同步解析 < 100ms
+  }
+  const exact = exactRows.length > 0;
+  for (const r of rows) {
+    r.vendor = String(e.vendor || '');
+    r.chatKey = String(e.chatKey || '(未知)');
+    r.sessionId = e.id;
+    r.exact = exact;
+  }
+  return {
+    rows,
+    searchCount: Number(e.searchCount ?? e.webSearchCount) || 0,
+    toolCounts: e.toolCounts || Object.create(null),
+    started,
+    mtime: Number(e.endedAt) || started,
+    endedAt: Number(e.endedAt) || started
+  };
+}
+
+/**
+ * （异步）刷新"已解析档案"。
+ * 新格式：索引摘要已经带逐次调用明细，读取成本与会话数成正比但常数极小；
+ * 旧格式：未迁移的 sessions/<id>.json 仍逐个解析（分片让步）。
+ * 索引里已有的 id 不再读旧文件，避免迁移期重复计数。
+ */
+async function refreshUsageArchive(sig) {
+  if (usageArchive.sessions && usageArchive.sig === sig) return usageArchive.sessions;
+  const map = new Map();
+  for (const e of readIndexEntries()) {
+    if (e?.id) map.set(String(e.id), indexEntryToParsed(e));
+  }
+  for (const e of readRunningSummaries()) {
+    if (e?.id && !map.has(String(e.id))) map.set(String(e.id), indexEntryToParsed(e));
+  }
+  const dir = sessionsDir();
+  const legacy = listLegacyFiles();
+  for (let i = 0; i < legacy.length; i += 1) {
+    const f = legacy[i];
+    const id = f.replace(/\.json$/, '');
+    if (!map.has(id)) map.set(id, parseUsageSessionFile(dir, f));
     if ((i + 1) % USAGE_PARSE_CHUNK === 0) await new Promise((r) => setImmediate(r));
   }
-  usageArchive.sessions = next;
+  usageArchive.sessions = map;
   usageArchive.sig = sig;
   usageArchive.at = Date.now();
-  return next;
+  return map;
 }
 
 async function collectUsageRows({ range }) {
   const win = resolveRange(range);
   // 命中缓存就直接返回（注意 rows 会被调用方改写字段，所以必须给副本）
-  const sig = sessionsDirSignature() + '@' + String(range);
+  const dirSig = sessionsDirSignature();
+  const sig = dirSig + '@' + String(range);
   if (usageRowsCache.rows && usageRowsCache.key === sig
       && (Date.now() - usageRowsCache.at) < USAGE_CACHE_TTL_MS) {
     return {
@@ -1931,13 +1999,9 @@ async function collectUsageRows({ range }) {
     };
   }
 
-  const dir = path.join(DATA_DIR, 'sessions');
-  let files = [];
-  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { return { rows: [], win, searchCount: 0, toolCounts: {} }; }
-
   // ── 数据量治理（2026-09-17，见"用量行缓存"注释的 A/B 方案）──
-  // 档案层增量解析 + 分片让步；时间窗过滤只对窗口内的素材做。
-  const archive = await refreshUsageArchive(dir, files, sig.split('@')[0]);
+  // 新格式下档案层 = index.jsonl（含逐次明细），不再扫会话目录。
+  const archive = await refreshUsageArchive(dirSig);
 
   const rows = [];
   // 会话级计数：搜索次数、各工具的调用次数。
@@ -1946,8 +2010,7 @@ async function collectUsageRows({ range }) {
   let searchCount = 0;
   const toolCounts = Object.create(null);
 
-  for (const f of files) {
-    const parsed = archive.get(f);
+  for (const parsed of archive.values()) {
     if (!parsed) continue;
     // started 只用于工具/搜索归窗；调用行一律按 r.at 过滤，started 缺失不再丢行
     const started = Number(parsed.started) || Number(parsed.mtime) || 0;
@@ -2080,15 +2143,15 @@ function saveUsageDayFile(dayKey, aggregates) {
  * 行的时间戳不可能晚于文件最后一次写入，因此 mtime < fromTs 的文件
  * 不可能包含该窗口内的调用行 —— 直接跳过，不 readFileSync / JSON.parse。
  */
-async function collectArchiveForWindow(dir, files, fromTs) {
+async function collectArchiveForWindow(fromTs) {
+  const archive = await refreshUsageArchive(sessionsDirSignature());
   const map = new Map();
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    let st;
-    try { st = fs.statSync(path.join(dir, f)); } catch { continue; }
-    if (fromTs && st.mtimeMs < fromTs) continue;
-    map.set(f, parseUsageSessionFile(dir, f));
-    if ((i + 1) % USAGE_PARSE_CHUNK === 0) await new Promise((r) => setImmediate(r));
+  for (const [id, parsed] of archive) {
+    const started = Number(parsed.started) || 0;
+    const ended = Number(parsed.endedAt) || started;
+    // 会话跨窗口也保留（started/ended 任一落在窗口内）
+    if (fromTs && Math.max(started, ended) < fromTs) continue;
+    map.set(id, parsed);
   }
   return map;
 }
@@ -2201,9 +2264,6 @@ async function buildUsageStatsWithSnapshots({ range = '7' } = {}) {
   const win = resolveRange(range);
   const todayKey = dayKeyOf(Date.now());
   const todayStart = new Date(todayKey + 'T00:00:00').getTime();
-  const dir = path.join(DATA_DIR, 'sessions');
-  let files = [];
-  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { files = []; }
 
   // 已完结日：直接读按天文件；缺失的才记入待回算
   const fromTs = win.mode === 'all' ? 0 : win.start;
@@ -2222,7 +2282,7 @@ async function buildUsageStatsWithSnapshots({ range = '7' } = {}) {
   let recomputed = 0;
   if (needDays.length) {
     const minNeed = Math.min(...needDays.map((d) => new Date(d + 'T00:00:00').getTime()));
-    archive = await collectArchiveForWindow(dir, files, minNeed);
+    archive = await collectArchiveForWindow(minNeed);
     for (const dayKey of needDays) {
       const agg = aggregateDayFromArchive(archive, dayKey);
       if (!agg) continue;
@@ -2239,7 +2299,7 @@ async function buildUsageStatsWithSnapshots({ range = '7' } = {}) {
   // 今天（窗口含今天才需要）：实时聚合，只解析今天 0 点后写过的文件
   let todayAgg = null;
   if (includesToday) {
-    if (!archive) archive = await collectArchiveForWindow(dir, files, todayStart);
+    if (!archive) archive = await collectArchiveForWindow(todayStart);
     todayAgg = aggregateDayFromArchive(archive, todayKey);
   }
 
