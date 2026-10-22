@@ -1059,11 +1059,13 @@ export function createApp({ log = console.log } = {}) {
     if (event.post_type === 'notice' && event.notice_type === 'notify' && event.sub_type === 'poke') {
       return ingestPoke(event);
     }
-    // 好友/入群申请：OneBot 的 request 事件转给能力提供方（friend-approval / share-card）。
+    // 好友/入群申请：OneBot 的 request 事件转给能力提供方（friend-approval / share-card），
+    // 不再停留在「插件声明了 friend.request 但核心从不调用」的死代码状态。
     if (event.post_type === 'request') {
       const cap = event.request_type === 'group' ? 'group.request' : 'friend.request';
       const providers = skillManager.getCapabilityProviders(cap, {});
       if (!providers.length) return;
+      // 只交给第一个启用的提供方：两个插件同时开启时由加载顺序决定，避免重复同意/两次通知。
       try {
         await providers[0].fn({ event, onebot, sender });
       } catch (error) {

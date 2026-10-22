@@ -42,7 +42,10 @@ export const MULTI_PROVIDER_CAPABILITIES = new Set([
   'llm.usage',
   'llm.retry-advisor',
   'tool.guard',
-  'media.download'
+  'media.download',
+  // 运行前闸门：谁有理由说"这一轮别跑"都可以挂一道（如"机器人已下线"），
+  // 多个提供者依次问，任一说跳过即跳过（见 orchestrator 的 #wakeInner）。
+  'chat.skip-run'
 ]);
 
 export class SkillManager {

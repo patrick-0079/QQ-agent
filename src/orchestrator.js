@@ -548,6 +548,31 @@ export class Orchestrator {
       ? { tier: 3, count: Math.max(0, Number(storeConfigForChat(chatKey).historyCount) || 80), reason: `活跃期（话题：${activeState.topic}）`, shouldRespond: true }
       : tierResult;
 
+    // ── 运行前跳过闸门（Skill 提供，2026-10-22 新增）───────────────────────
+    // 有些状态是"这一轮根本不该跑"：建会话就要组装提示词、至少烧一次模型调用。
+    // 典型例子：机器人被主人"下线"期间的任何消息、以及下线那一刻的指令本身。
+    //
+    // Skill 通过 `chat.skip-run` 能力给出判定（多提供者：任一说跳过就跳过）：
+    //   ({ chatKey, kind, entries, proactive }) => ({ skip: true, reason })
+    // 返回 skip 就**不建会话、不调模型**，消息标已读沉入历史（不丢，之后仍可作上下文）。
+    //
+    // 与 chat.ban-state 的分工：那个专指"我在这个群被 QQ 禁言"、只对群生效；
+    // 这个对群/私聊通用，语义由提供者定义。两个都保留：禁言是外部事实，跳过是策略。
+    try {
+      const gateKind = String(chatKey).startsWith('private:') ? 'private' : 'group';
+      for (const p of skillManager.getCapabilityProviders('chat.skip-run', { chatKey, kind: gateKind })) {
+        const verdict = await p.fn({ chatKey, kind: gateKind, entries: triggerEntries, proactive });
+        if (!verdict || verdict.skip !== true) continue;
+        const archived = this.store.markAllRead(chatKey);
+        this.#discardWaiting(waitingSessionId);
+        if (archived > 0) this.emit('chat-update', chatKey);
+        console.log(`[orchestrator] ${chatKey} 跳过本轮（${p.skillId}）：${verdict.reason || 'Skill 判定无需运行'}`);
+        return;
+      }
+    } catch (error) {
+      skillManager.recordError('chat.skip-run', error);
+    }
+
     this.runningChats.add(chatKey);
     const seq = (this.runSeq.get(chatKey) || 0) + 1;
     this.runSeq.set(chatKey, seq);
@@ -1247,8 +1272,9 @@ export class Orchestrator {
       // 等等都保留正常循环），这里只负责把现场信息递过去。
       // 插件没启用 / localPolicy 没开时该项为 false，行为与没有这套机制一致。
       if (!finish) {
-        // 可能有多个提供方（auto-finish / silent-voice-check），逐个询问；
-        // 以前 #capFirst 只取第一个，两个都启用时后一个静默失效。
+        // 可能有多个提供方（auto-finish 投递即收尾 / silent-voice-check 漏发自检）。
+        // 逐个询问，任一判定 shouldEnd 就收尾 —— 以前 #capFirst 只取第一个，
+        // 两个都启用时后一个永远静默失效。
         for (const provider of skillManager.getCapabilityProviders('reply.local-policy', skillContext)) {
           if (finish) break;
           try {
