@@ -73,6 +73,7 @@
 
   <nav id="tabs">
     <button class="tab active" data-tab="chatmanage">会话管理</button>
+    <button class="tab" data-tab="personas">人设管理</button>
     <button class="tab" data-tab="usage">用量</button>
     <button class="tab" data-tab="skills">技能仓库</button>
     <button class="tab" data-tab="plugins">插件仓库</button>
@@ -144,6 +145,12 @@
       </div>
     </section>
 
+    <!-- 人设管理视图（全局）：人设库的增删查改。
+         会话里只保留「选择人设」，新增入口收敛到这一页（2026-10-22）。 -->
+    <section id="view-personas" class="view">
+      <div id="personas-page" class="usage-pane"></div>
+    </section>
+
     <!-- 用量视图（全局） -->
     <section id="view-usage" class="view">
       <div id="usage-page" class="usage-pane"></div>
@@ -173,7 +180,7 @@
     </section>
   </main>
 
-  <!-- M9 拆分：ESM 桥（vendor 模块 → window）先执行；其后 12 段普通脚本按 defer 顺序执行，
+  <!-- M9 拆分：ESM 桥（vendor 模块 → window）先执行；其后各段普通脚本按 defer 顺序执行，
        module 与 defer 共享同一条按文档顺序的延迟队列，保证桥先于 00-core.js。 -->
   <script type="module" src="/app.js"></script>
   <script defer src="/app/00-core.js"></script>
@@ -190,6 +197,7 @@
   <script defer src="/app/12-concept2-ui.js"></script>
   <script defer src="/app/13-chat-settings.js"></script>
   <script defer src="/app/14-chat-manage.js"></script>
+  <script defer src="/app/15-persona-manage.js"></script>
   <script defer src="/app/11-init.js"></script>
 
   <!-- 阿里云验证码 2.0（意见收集/金句上传共用）：容器常驻；AliyunCaptchaConfig 与

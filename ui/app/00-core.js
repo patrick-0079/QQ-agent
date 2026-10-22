@@ -959,6 +959,8 @@ function switchTab(name) {
     api('/api/chats').then((d) => { state.chats = d.chats || []; }).catch(() => {});
   }
   if (name === 'usage') loadUsageView({ force: true });
+  // 人设管理：一级菜单，进入时从后端拉一次人设库（增删改后由页面自己重拉）
+  if (name === 'personas') loadPersonaPage();
   if (name === 'skills') loadModulePage('skill');
   if (name === 'plugins') loadModulePage('plugin');
   if (name === 'snowluma') loadSnowlumaPage();

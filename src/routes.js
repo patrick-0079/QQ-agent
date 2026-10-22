@@ -390,11 +390,15 @@ export function createRoutes(deps) {
     },
 
     // ── 人设模板 ─────────────────────────────────────────────────────
+    // 人设库的增删查改（2026-10-22）：一级菜单「人设管理」使用这套接口。
+    //   · 内置人设来自 src/personas.js，只读；想改先复制成自定义（POST）。
+    //   · 自定义人设存在 config.customPersonas，id 用数组下标派生 custom_<i>；
+    //     列表每次现算 id —— 删除后重排是安全的，因为前端每次操作后都会重新拉取。
     {
       method: 'GET', pattern: '/api/persona-templates',
       handler: async ({ res, json }) => {
         const { PERSONAS } = await import('./personas.js');
-        const builtins = Object.entries(PERSONAS).map(([id, p]) => ({ id, name: p.name, text: p.text, builtin: true }));
+        const builtins = Object.entries(PERSONAS).map(([id, p]) => ({ id, name: p.name, text: p.text, customRules: p.customRules || '', builtin: true }));
         const customs = (getConfig().customPersonas || []).map((p, i) => ({
           id: `custom_${i}`, name: p.name, text: p.text, customRules: p.customRules || '', builtin: false
         }));
@@ -412,14 +416,46 @@ export function createRoutes(deps) {
         if (String(body.customRules ?? '').trim()) entry.customRules = String(body.customRules).trim();
         const next = [...(getConfig().customPersonas || []), entry];
         updateConfig({ customPersonas: next });
-        return json(res, 200, { ok: true, templates: next });
+        const id = `custom_${next.length - 1}`;
+        return json(res, 200, { ok: true, id, template: { id, name, text, customRules: entry.customRules || '', builtin: false }, templates: next });
+      }
+    },
+    {
+      method: 'PATCH', pattern: /^\/api\/persona-templates\/([^/]+)$/,
+      handler: async ({ req, res, json, match }) => {
+        const id = String(match[1] || '');
+        if (!/^custom_\d+$/.test(id)) {
+          return json(res, 400, { ok: false, error: '内置人设是代码内置的，不能直接修改；请先复制为自定义人设。' });
+        }
+        const idx = Number(id.slice('custom_'.length));
+        const list = [...(getConfig().customPersonas || [])];
+        const current = list[idx];
+        if (!current) return json(res, 404, { ok: false, error: '人设不存在（可能已被删除，请刷新列表）' });
+        const body = await bodyOf(req);
+        const name = body.name === undefined ? String(current.name ?? '') : String(body.name ?? '').trim().slice(0, 50);
+        const text = body.text === undefined ? String(current.text ?? '') : String(body.text ?? '').trim();
+        if (!name || !text) return json(res, 400, { ok: false, error: '人设名称和角色设定都不能为空' });
+        const customRules = body.customRules === undefined
+          ? String(current.customRules ?? '')
+          : String(body.customRules ?? '').trim();
+        const entry = { ...current, name, text };
+        if (customRules) entry.customRules = customRules;
+        else delete entry.customRules;
+        list[idx] = entry;
+        updateConfig({ customPersonas: list });
+        return json(res, 200, {
+          ok: true,
+          template: { id, name, text, customRules: entry.customRules || '', builtin: false }
+        });
       }
     },
     {
       method: 'DELETE', pattern: /^\/api\/persona-templates\/(custom_\d+)$/,
       handler: async ({ res, json, match }) => {
         const idx = Number(match[1].replace('custom_', ''));
-        const next = (getConfig().customPersonas || []).filter((_, i) => i !== idx);
+        const list = (getConfig().customPersonas || []);
+        if (!list[idx]) return json(res, 404, { ok: false, error: '人设不存在（可能已被删除）' });
+        const next = list.filter((_, i) => i !== idx);
         updateConfig({ customPersonas: next });
         return json(res, 200, { ok: true });
       }

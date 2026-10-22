@@ -214,6 +214,17 @@ await c.check('切换页签会加载对应页（switchTab 里两个分支都在�
     "switchTab 里没有 plugins 分支");
 });
 
+await c.check('「人设管理」是一级页签，且 switchTab 真的会加载人设页', () => {
+  const tabs = [...html.matchAll(/data-tab="([\w-]+)"/g)].map((m) => m[1]);
+  assert.ok(tabs.includes('personas'), '一级菜单里没有「人设管理」页签');
+  assert.ok(html.includes('id="view-personas"'), '缺少人设管理视图容器 #view-personas');
+  assert.ok(html.includes('id="personas-page"'), '缺少人设管理渲染宿主 #personas-page');
+  assert.ok(/name === 'personas'\)\s*loadPersonaPage\(\)/.test(appJs),
+    'switchTab 里没有 personas 分支（点进去会是空白页）');
+  // 2026-10-22：会话面板不再提供新增人设入口，人设库统一到「人设管理」
+  assert.ok(!appJs.includes('id="new-persona-btn"'), '会话面板里仍然残留「＋ 添加人设」按钮');
+});
+
 await c.check('技能页与插件页按 kind 隔离（不会把插件渲染进技能页）', () => {
   // 两页共用 renderModulePage，靠 kind 过滤。过滤条件一旦写错，
   // 两页会显示一样的内容 —— 静态上先盯住"过滤用的是 kind、不是 source"。

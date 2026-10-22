@@ -139,7 +139,7 @@ const ctx = vm.createContext(sandbox);
     'renderSettingsSection', 'renderApiSection', 'renderSearchSection',
     'renderMemorySettingsSection', 'renderPersonaSection',
     'renderChatSection', 'renderSecuritySection', 'renderSystemSection',
-    'renderPersonaPicker', 'renderHealthCard', 'renderSkillsPage', 'renderPluginsPage'
+    'renderPersonaPicker', 'renderPersonaPage', 'renderHealthCard', 'renderSkillsPage', 'renderPluginsPage'
   ];
 
   // 直接用后端的 DEFAULT_CONFIG 做桩 —— 不要手敲字段名，
@@ -215,6 +215,38 @@ const ctx = vm.createContext(sandbox);
       console.log('  FAIL  ' + name + ' 抛错: ' + (e && e.message));
       results.push({ name, err: e && e.message });
     }
+  }
+
+  // ── 人设管理（2026-10-22）：一级菜单页 + 会话面板只选不建 ──
+  console.log('\n=== 人设管理页 / 会话面板入口 ===');
+  try {
+    const picker = (ctx.renderPersonaPicker || sandbox.renderPersonaPicker)(cfg);
+    const pickerNoAdd = picker.includes('id="cfg-persona-pick"')
+      && !picker.includes('id="new-persona-btn"')
+      && !picker.includes('＋ 添加人设');
+    pickerNoAdd ? pass++ : fail++;
+    console.log(`  ${pickerNoAdd ? 'OK   ' : 'FAIL '} 会话面板只保留「选择人设」，没有「＋ 添加人设」按钮`);
+
+    vm.runInContext(`state.personaSearch = '';
+      state.personaList = [
+        { id: 'xiaojingyu', name: '小鲸鱼（默认）', text: '内置角色设定示例。', builtin: true },
+        { id: 'custom_0', name: '测试自定义人设', text: '自定义角色设定示例。', customRules: '规则', builtin: false }
+      ];`, ctx);
+    const page = (ctx.renderPersonaPage || sandbox.renderPersonaPage)();
+    const pageOk = page.includes('id="persona-new-btn"')
+      && page.includes('id="persona-search"')
+      && page.includes('data-persona-action="view"')
+      && page.includes('data-persona-action="copy"')
+      && page.includes('data-persona-action="edit"')
+      && page.includes('data-persona-action="delete"');
+    pageOk ? pass++ : fail++;
+    console.log(`  ${pageOk ? 'OK   ' : 'FAIL '} 人设管理页含新建/搜索/查看/复制/编辑/删除入口`);
+    const builtinReadonly = page.includes('内置') && page.includes('复制为自定义');
+    builtinReadonly ? pass++ : fail++;
+    console.log(`  ${builtinReadonly ? 'OK   ' : 'FAIL '} 内置人设只读（提供「复制为自定义」）`);
+  } catch (e) {
+    fail++;
+    console.log('  FAIL  人设管理页渲染抛错: ' + (e && e.message));
   }
 
   // ── 技能页 / 插件页必须各自只渲染自己那一型 ──

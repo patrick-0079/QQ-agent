@@ -204,11 +204,37 @@ c.section('3. 人设模板');
     assert.equal(r.status, 400, '空名称应 400');
   });
 
+  await c.check('PATCH /api/persona-templates/:id：修改名称/正文/附加规则', async () => {
+    const r = await hit('PATCH', `/api/persona-templates/${customId}`, {
+      body: { name: '改名后的人设', text: '你是一个改名后的测试人设。', customRules: '回复要简短。' }
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.data.ok, true);
+    const list = await hit('GET', '/api/persona-templates');
+    const found = list.data.templates.find((t) => t.id === customId);
+    assert.ok(found, '修改后的人设应仍在列表里');
+    assert.equal(found.name, '改名后的人设');
+    assert.ok(found.text.includes('改名后的测试人设'));
+    assert.equal(found.customRules, '回复要简短。');
+  });
+
+  await c.check('PATCH /api/persona-templates/:id：内置人设只读（400）', async () => {
+    const r = await hit('PATCH', '/api/persona-templates/xiaojingyu', { body: { name: '想改内置' } });
+    assert.equal(r.status, 400, `内置人设应拒绝修改，实际 ${r.status}`);
+    assert.equal(r.data.ok, false);
+  });
+
+  await c.check('PATCH /api/persona-templates/:id：不存在的人设 404', async () => {
+    const r = await hit('PATCH', '/api/persona-templates/custom_99999', { body: { name: 'x' } });
+    assert.equal(r.status, 404, `不存在应 404，实际 ${r.status}`);
+  });
+
   await c.check('DELETE /api/persona-templates/:id：删除自定义模板', async () => {
     const r = await hit('DELETE', `/api/persona-templates/${customId}`);
     assert.equal(r.status, 200);
     const list = await hit('GET', '/api/persona-templates');
-    assert.ok(!list.data.templates.some((t) => t.name === '覆盖人设'), '删除后不应再出现');
+    assert.ok(!list.data.templates.some((t) => t.id === customId), '删除后不应再出现');
+    assert.ok(!list.data.templates.some((t) => t.name === '改名后的人设'), '删除后不应再出现');
   });
 }
 

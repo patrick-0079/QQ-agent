@@ -458,7 +458,9 @@ async function loadSettings() {
     state.skillsSummary = skillsData.summary || {};
     state.uninstalledSkills = skillsData.uninstalled || [];
   }
-  for (const t of tplData.templates || []) state.personaTemplates[t.id] = { name: t.name, text: t.text, builtin: !!t.builtin };
+  // customRules 也要带上：openPersonaPicker 选中自定义人设时会回填「管理员附加规则」，
+  // 以前这里丢掉这个字段，选中后反而把规则清空。
+  for (const t of tplData.templates || []) state.personaTemplates[t.id] = { name: t.name, text: t.text, customRules: t.customRules || '', builtin: !!t.builtin };
   // 左栏会话列表（搜索/置顶状态在这里也是一部分数据）
   // ⚠️ 必须 await：否则 renderSettings 先跑，左栏拿到空列表渲染出"还没有会话"，
   //    等 /api/chat-profiles 回来才补行（空窗期点击/断言都会看到 0 行）。
@@ -763,16 +765,19 @@ function openBatchPriceModal() {
 function renderPersonaPicker(c) {
   const currentId = Object.entries(state.personaTemplates || {}).find(([, p]) => p.text === (c.persona?.roleText || ''))?.[0] || '';
   const currentName = state.personaTemplates[currentId]?.name || '';
+  // 2026-10-22：会话面板只负责"选用"，不再提供「＋ 添加人设」。
+  // 人设库的增删改统一在顶部一级菜单「人设管理」里做 —— 否则每个会话面板
+  // 都长着一个新增按钮，人设散落各处、也没法统一查看和编辑。
   return `
     <div class="field-row" style="align-items:flex-end">
       <div class="field">
         <label>选择人设</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <input type="text" id="cfg-persona-pick" class="inp persona-pick" readonly placeholder="点击选择人设" value="${esc(currentName)}" style="flex:1;min-width:160px;cursor:pointer" />
-          <button class="btn btn-small" id="new-persona-btn">＋ 添加人设</button>
           <button class="btn btn-small btn-danger hidden" id="del-persona-btn">删除当前自定义人设</button>
         </div>
         <span id="persona-pick-hint" class="muted" style="font-size:12px"></span>
+        <span class="muted" style="font-size:12px">新增 / 编辑人设请到顶部「人设管理」页签。</span>
       </div>
     </div>`;
 }

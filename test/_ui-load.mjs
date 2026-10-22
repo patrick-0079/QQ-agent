@@ -1,8 +1,8 @@
 // 共享的 ui/app 拆分加载器（M9，2026-09-19）。
 //
-// ui/app.js 从 8875 行单文件拆成了「1 个 ESM 桥 + 12 个普通脚本段」：
+// ui/app.js 从 8875 行单文件拆成了「1 个 ESM 桥 + 多个普通脚本段」：
 //   ui/app.js          ES module：import /vendor/*.js 并挂到 window
-//   ui/app/00-11*.js   普通脚本：按文件名顺序执行，共享全局词法绑定
+//   ui/app/00-15*.js   普通脚本：按 index.html 的 defer 顺序执行，共享全局词法绑定
 //
 // 测试侧（render / scroll / skill-modal-ui / coverage-wiring）沿用原来的
 // vm / window.eval 方案跑这段代码，但对象从"一个文件"变成了"13 个文件"。
@@ -26,7 +26,7 @@ export const APP_PARTS = [
   '04-archive-usage.js', '05-memory-settings.js', '06-settings-render.js',
   '07-settings-events.js', '08-modals.js', '09-community.js',
   '10-feedback.js', '12-concept2-ui.js', '13-chat-settings.js',
-  '14-chat-manage.js', '11-init.js'
+  '14-chat-manage.js', '15-persona-manage.js', '11-init.js'
 ];
 
 /** 读单段。 */

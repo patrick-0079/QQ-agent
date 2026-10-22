@@ -922,8 +922,7 @@ function bindSettingsEvents(c) {
   if (personaPick) {
     personaPick.addEventListener('click', () => openPersonaPicker());
   }
-  const newPersonaBtn = $('#new-persona-btn');
-  if (newPersonaBtn) newPersonaBtn.addEventListener('click', () => openPersonaCreateModal());
+  // 「＋ 添加人设」已从会话面板移除：人设库的增删改统一在「人设管理」页签。
   const delPersonaBtn = $('#del-persona-btn');
   if (delPersonaBtn) delPersonaBtn.addEventListener('click', async () => {
     const id = currentPersonaId();

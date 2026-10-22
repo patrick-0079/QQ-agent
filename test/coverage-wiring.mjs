@@ -159,7 +159,7 @@ cov['首屏'] = scan('首屏');
 // ⚠️ 这份列表必须与 index.html 里的 .tab 保持一致 —— 漏掉一个页签，
 // 那一页的按钮就永远不会被接线检查覆盖（skills/plugins 曾经就是这样被漏掉的）。
 const visitedTabs = [];
-for (const t of ['chatmanage', 'usage', 'skills', 'plugins', 'snowluma', 'settings']) {
+for (const t of ['chatmanage', 'personas', 'usage', 'skills', 'plugins', 'snowluma', 'settings']) {
   const tabBtn = window.document.querySelector(`.tab[data-tab="${t}"]`);
   if (tabBtn) tabBtn.click(); else { try { window.switchTab(t); } catch { /* ignore */ } }
   await sleep(800);
@@ -324,7 +324,8 @@ const MODALS = [
   ['调用明细', 'openToolBreakdown', [], null],
   ['用量下钻', 'openUsageBreakdown', ['model', 'm0'], null],
   ['人设选择器', 'openPersonaPicker', [], 'persona'],
-  ['人设新建', 'openPersonaCreateModal', [], 'persona'],
+  ['人设详情', 'openPersonaViewModal', ['xiaojingyu'], null],
+  ['人设新建', 'openPersonaCreateModal', [], null],
   ['添加会话', 'openAddSessionModal', [], null],
   ['模型选择器', 'openModelPicker', [], 'api'],
   ['记忆模型选择器', 'openMemoryModelPicker', [], 'memory'],

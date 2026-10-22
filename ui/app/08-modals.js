@@ -197,63 +197,23 @@ function openPersonaPicker() {
         //    完就保存了，实际上防抖窗口从未开启，切页签的 flush 也无从发起。
         //    主动派发 input 让表单监听器（#settings-form 上的委托监听）感知变化。
         $('#cfg-roletext')?.dispatchEvent(new Event('input', { bubbles: true }));
+        // 同步会话面板上的提示与「删除当前自定义人设」按钮状态。
+        // （syncPersonaButtons 是 bindSettingsEvents 内部的闭包，这里拿不到，
+        //  原来调用它会抛 ReferenceError —— 直接更新可见 DOM 即可。）
+        const hint = $('#persona-pick-hint');
+        if (hint) hint.textContent = tpl.builtin ? '内置人设' : '自定义人设';
+        const delBtn = $('#del-persona-btn');
+        if (delBtn) delBtn.classList.toggle('hidden', !String(id).startsWith('custom_'));
       }
       closeModelModal(overlay);
-      syncPersonaButtons();
     });
   });
   overlay.querySelector('#persona-cancel').addEventListener('click', () => closeModelModal(overlay));
 }
 
-/** 添加人设：弹窗填写人设名称、角色设定、管理员附加规则。 */
-function openPersonaCreateModal() {
-  const overlay = modelModalShell({
-    head: '添加人设',
-    body: `
-      <div class="field" style="flex:1;min-width:0">
-        <label>人设名称</label>
-        <input type="text" id="new-persona-name" placeholder="例如：毒舌老哥" />
-      </div>
-      <div class="field" style="flex:1;min-width:0">
-        <label>角色设定</label>
-        <textarea id="new-persona-text" class="persona-role-text" style="min-height:220px" placeholder="人设文本"></textarea>
-      </div>
-      <div class="field" style="flex:1;min-width:0">
-        <label>管理员附加规则（可选）</label>
-        <textarea id="new-persona-rules" style="min-height:90px" placeholder="可选：追加到系统提示的规则"></textarea>
-      </div>`,
-    foot: `<button class="btn" id="persona-add-cancel">取消</button>
-           <button class="btn btn-primary" id="persona-add-apply">确认添加</button>`
-  });
-  overlay.querySelector('#persona-add-cancel').addEventListener('click', () => closeModelModal(overlay));
-  overlay.querySelector('#persona-add-apply').addEventListener('click', async () => {
-    const name = overlay.querySelector('#new-persona-name').value.trim();
-    const text = overlay.querySelector('#new-persona-text').value.trim();
-    const customRules = overlay.querySelector('#new-persona-rules').value.trim();
-    if (!name) { $('#persona-pick-hint').textContent = '人设名称不能为空'; return; }
-    if (!text) { $('#persona-pick-hint').textContent = '角色设定不能为空'; return; }
-    try {
-      await api('/api/persona-templates', {
-        method: 'POST',
-        body: JSON.stringify({ name, text, customRules })
-      });
-      closeModelModal(overlay);
-      $('#cfg-roletext').value = text;
-      $('#cfg-customrules').value = customRules;
-      const input = $('#cfg-persona-pick');
-      if (input) input.value = name;
-      // 同 openPersonaPicker：程序化赋值不触发 input 事件，自动保存不会启动 ——
-      // 主动派发一次，否则"添加完人设切走页签"就丢（保存从未发起）。
-      $('#cfg-roletext')?.dispatchEvent(new Event('input', { bubbles: true }));
-      await loadSettings();
-      // loadSettings 会重渲染整个表单；重渲染用的是 state.config（含刚派发
-      // 事件触发的自动保存最终值）。自动保存在途时渲染守卫会拦下并补绘，不会丢。
-      $('#persona-pick-hint').textContent = `人设「${name}」已添加并填入表单，自动保存稍后生效（也可切走页签前确认）。`;
-    } catch (e) {
-      $('#persona-pick-hint').textContent = `添加失败：${e.message}`;
-    }
-  });
-}
+// 人设的新建 / 编辑 / 复制弹窗已搬到「人设管理」页签所在的
+// 15-persona-manage.js（openPersonaCreateModal / openPersonaEditModal）。
+// 会话面板不再提供新增入口，只保留 openPersonaPicker 做选用。
 
 /**
  * 「模型配置」模态框（2026-09-18 改版）：收纳原页面的
